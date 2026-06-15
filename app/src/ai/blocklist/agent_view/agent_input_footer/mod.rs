@@ -53,12 +53,25 @@ pub(crate) use self::environment_selector::{
 };
 use crate::ai::AIRequestUsageModel;
 use crate::ai::blocklist::BlocklistAIInputModel;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::acp::selectors::{
+    LocalAcpHarnessSelector, LocalAcpModelSelector, LocalAcpSelectorEvent,
+};
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::acp::{
+    harness_picker::{LocalAcpHarnessModel, LocalAcpHarnessModelEvent},
+    models as local_acp_models, openusage as local_acp_openusage,
+};
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::agent::conversation::AIConversation;
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::usage::icon_for_context_window_usage;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::harness_availability::HarnessAvailabilityModel;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::harness_display;
 use crate::appearance::Appearance;
 use crate::auth::{AuthManager, AuthStateProvider};
 use crate::completer::SessionContext;
@@ -201,6 +214,13 @@ pub struct AgentInputFooter {
     live_session_indicator: ViewHandle<ActionButton>,
     new_cloud_vm_indicator: ViewHandle<ActionButton>,
     model_selector: ViewHandle<ProfileModelSelector>,
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    local_acp_harness_selector: ViewHandle<LocalAcpHarnessSelector>,
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    local_acp_model_selector: ViewHandle<LocalAcpModelSelector>,
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    local_acp_openusage_summary: Option<(Harness, local_acp_openusage::OpenUsageSummary)>,
+    ftu_callout_close_button: ViewHandle<ActionButton>,
     environment_selector: Option<ViewHandle<EnvironmentSelector>>,
     handoff_environment_selector: ViewHandle<EnvironmentSelector>,
     prompt_alert: ViewHandle<PromptAlertView>,
@@ -733,6 +753,63 @@ impl AgentInputFooter {
             )
         });
 
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        let local_acp_harness_selector = ctx.add_typed_action_view(|ctx| {
+            LocalAcpHarnessSelector::new(menu_positioning_provider.clone(), ctx)
+        });
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        let local_acp_model_selector = ctx.add_typed_action_view(|ctx| {
+            LocalAcpModelSelector::new(menu_positioning_provider.clone(), ctx)
+        });
+
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        ctx.subscribe_to_view(
+            &local_acp_harness_selector,
+            |_, _, event, ctx| match event {
+                LocalAcpSelectorEvent::MenuVisibilityChanged { open } => {
+                    if *open {
+                        ctx.emit(AgentInputFooterEvent::ModelSelectorOpened);
+                    } else {
+                        ctx.emit(AgentInputFooterEvent::ModelSelectorClosed);
+                    }
+                }
+            },
+        );
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        ctx.subscribe_to_view(&local_acp_model_selector, |_, _, event, ctx| match event {
+            LocalAcpSelectorEvent::MenuVisibilityChanged { open } => {
+                if *open {
+                    ctx.emit(AgentInputFooterEvent::ModelSelectorOpened);
+                } else {
+                    ctx.emit(AgentInputFooterEvent::ModelSelectorClosed);
+                }
+            }
+        });
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        {
+            let local_acp_harness_model = LocalAcpHarnessModel::handle(ctx);
+            ctx.subscribe_to_model(&local_acp_harness_model, |me, _, event, ctx| match event {
+                LocalAcpHarnessModelEvent::SelectionChanged => {
+                    me.refresh_local_acp_openusage_summary(ctx);
+                    me.update_context_window_button(ctx);
+                }
+            });
+        }
+
+        if let Some(environment_selector) = environment_selector.as_ref() {
+            ctx.subscribe_to_view(environment_selector, |_, _, event, ctx| match event {
+                EnvironmentSelectorEvent::MenuVisibilityChanged { open } => {
+                    ctx.emit(AgentInputFooterEvent::ToggledChipMenu { open: *open });
+                    if !*open {
+                        ctx.emit(AgentInputFooterEvent::EnvironmentSelectorClosed);
+                    }
+                }
+                EnvironmentSelectorEvent::OpenEnvironmentManagementPane => {
+                    ctx.emit(AgentInputFooterEvent::OpenEnvironmentManagementPane);
+                }
+            });
+        }
+
         ctx.subscribe_to_view(
             &handoff_environment_selector,
             |_, _, event, ctx| match event {
@@ -920,6 +997,12 @@ impl AgentInputFooter {
             live_session_indicator,
             new_cloud_vm_indicator,
             model_selector: profile_model_selector_full,
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            local_acp_harness_selector,
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            local_acp_model_selector,
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            local_acp_openusage_summary: None,
             environment_selector,
             handoff_environment_selector,
             prompt_alert,
@@ -943,6 +1026,13 @@ impl AgentInputFooter {
         };
         me.sync_fast_forward_button(ctx);
         me.sync_remote_control_button(ctx);
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        {
+            LocalAcpHarnessModel::handle(ctx).update(ctx, |state, ctx| {
+                state.ensure_all_models_discovered(ctx);
+            });
+            me.refresh_local_acp_openusage_summary(ctx);
+        }
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);
         // Route ambient wiring through the setter so construction and the lazy shared-session
@@ -978,6 +1068,12 @@ impl AgentInputFooter {
         if let Some(selector) = self.v2_model_selector.clone() {
             selector.update(ctx, |s, ctx| s.open_menu(ctx));
         }
+    }
+
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    pub fn open_local_acp_model_selector(&mut self, ctx: &mut ViewContext<Self>) {
+        self.local_acp_model_selector
+            .update(ctx, |selector, ctx| selector.open_menu(ctx));
     }
 
     pub fn is_v2_environment_selector_open(&self, app: &AppContext) -> bool {
@@ -2075,7 +2171,23 @@ impl AgentInputFooter {
         if let Some(conversation) =
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
         {
-            let usage = conversation.context_window_usage();
+            let (usage, tooltip) = {
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                {
+                    self.local_acp_context_window_usage(&conversation, ctx)
+                        .unwrap_or_else(|| {
+                            let usage = conversation.context_window_usage();
+                            let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+                            (usage, format!("{remaining_pct}% context remaining"))
+                        })
+                }
+                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
+                {
+                    let usage = conversation.context_window_usage();
+                    let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+                    (usage, format!("{remaining_pct}% context remaining"))
+                }
+            };
             let icon = icon_for_context_window_usage(usage);
             let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
 
@@ -2132,6 +2244,85 @@ impl AgentInputFooter {
         self.prompt_cache_expiry_timer_handle = Some(handle);
     }
 
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    fn local_acp_context_window_usage(
+        &self,
+        conversation: &AIConversation,
+        app: &AppContext,
+    ) -> Option<(f32, String)> {
+        let selection = LocalAcpHarnessModel::as_ref(app);
+        let harness = selection.selected_harness();
+        if let Some((summary_harness, summary)) = &self.local_acp_openusage_summary {
+            if *summary_harness == harness {
+                let usage = summary.usage_fraction.unwrap_or(0.0);
+                return Some((usage, format!("OpenUsage:\n{}", summary.display)));
+            }
+        }
+
+        let model_id = selection.selected_model_id();
+        let context_window_tokens =
+            local_acp_models::context_window_tokens_for_selection(harness, model_id)?;
+        let estimated_tokens = Self::estimate_local_acp_conversation_tokens(conversation);
+        let usage = if context_window_tokens == 0 {
+            0.0
+        } else {
+            (estimated_tokens as f32 / context_window_tokens as f32).clamp(0.0, 1.0)
+        };
+        let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+        let model_label = model_id.unwrap_or("default");
+        let tooltip = format!(
+            "{remaining_pct}% context remaining (estimated for {} {model_label}, {} token window)",
+            harness_display::display_name(harness),
+            context_window_tokens
+        );
+        Some((usage, tooltip))
+    }
+
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    fn refresh_local_acp_openusage_summary(&mut self, ctx: &mut ViewContext<Self>) {
+        let harness = LocalAcpHarnessModel::as_ref(ctx).selected_harness();
+        ctx.spawn(
+            async move { local_acp_openusage::provider_summary(harness).await },
+            move |me, result, ctx| {
+                match result {
+                    Ok(Some(summary)) => {
+                        me.local_acp_openusage_summary = Some((harness, summary));
+                    }
+                    Ok(None) => {
+                        if me
+                            .local_acp_openusage_summary
+                            .as_ref()
+                            .is_some_and(|(summary_harness, _)| *summary_harness == harness)
+                        {
+                            me.local_acp_openusage_summary = None;
+                        }
+                    }
+                    Err(error) => {
+                        log::debug!("Failed to read OpenUsage provider summary: {error:#}");
+                    }
+                }
+                me.update_context_window_button(ctx);
+            },
+        );
+    }
+
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    fn estimate_local_acp_conversation_tokens(conversation: &AIConversation) -> u32 {
+        let mut chars = 0usize;
+        for exchange in conversation.all_exchanges() {
+            for input in &exchange.input {
+                chars += input.to_string().chars().count();
+            }
+            if let Some(output) = exchange.output_status.output() {
+                let output = output.get();
+                for message in &output.messages {
+                    chars += message.to_string().chars().count();
+                }
+            }
+        }
+        chars.div_ceil(4).try_into().unwrap_or(u32::MAX)
+    }
+
     fn render_toolbar_item(
         &self,
         item: &AgentToolbarItemKind,
@@ -2176,9 +2367,24 @@ impl AgentInputFooter {
                     .map(|chip| ChildView::new(chip).finish())
             }
             AgentToolbarItemKind::ModelSelector => {
-                let show = FeatureFlag::ProfilesDesignRevamp.is_enabled()
-                    || *SessionSettings::as_ref(app).show_model_selectors_in_prompt;
-                show.then(|| ChildView::new(&self.model_selector).finish())
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                {
+                    return Some(
+                        Flex::row()
+                            .with_main_axis_size(MainAxisSize::Min)
+                            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                            .with_spacing(4.)
+                            .with_child(ChildView::new(&self.local_acp_harness_selector).finish())
+                            .with_child(ChildView::new(&self.local_acp_model_selector).finish())
+                            .finish(),
+                    );
+                }
+                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
+                {
+                    let show = FeatureFlag::ProfilesDesignRevamp.is_enabled()
+                        || *SessionSettings::as_ref(app).show_model_selectors_in_prompt;
+                    show.then(|| ChildView::new(&self.model_selector).finish())
+                }
             }
             AgentToolbarItemKind::NLDToggle => Some(ChildView::new(&self.nld_button).finish()),
             AgentToolbarItemKind::VoiceInput => {
