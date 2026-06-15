@@ -38,6 +38,8 @@ use crate::terminal::cli_agent_sessions::{CLIAgentSessionStatus, CLIAgentSession
 use crate::terminal::model::block::{BlockId, SerializedBlock};
 use crate::util::path::resolve_executable;
 
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+pub(crate) mod acp;
 pub(crate) mod claude_code;
 pub(crate) mod claude_transcript;
 mod codex;
@@ -46,6 +48,9 @@ mod gemini;
 mod json_utils;
 mod skill_dirs_publish;
 mod telemetry;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+#[allow(unused_imports)]
+pub(crate) use acp::{local_acp_harness_kind, AcpHarness};
 pub(crate) use claude_code::ClaudeHarness;
 use claude_transcript::ClaudeResumeInfo;
 use codex::CodexHarness;
@@ -257,6 +262,8 @@ pub(crate) fn harness_kind(harness: Harness) -> Result<HarnessKind, AgentDriverE
         Harness::Codex => Ok(HarnessKind::ThirdParty(Box::new(CodexHarness))),
         Harness::OpenCode => Ok(HarnessKind::Unsupported(Harness::OpenCode)),
         Harness::Gemini => Ok(HarnessKind::ThirdParty(Box::new(GeminiHarness))),
+        Harness::Cursor => Ok(HarnessKind::Unsupported(Harness::Cursor)),
+        Harness::Devin => Ok(HarnessKind::Unsupported(Harness::Devin)),
         Harness::Unknown => Err(AgentDriverError::InvalidRuntimeState),
     }
 }
@@ -469,7 +476,13 @@ pub(crate) fn harness_model_env_vars(
         Harness::Claude => {
             env_vars.insert(OsString::from("ANTHROPIC_MODEL"), OsString::from(model_id));
         }
-        Harness::Oz | Harness::OpenCode | Harness::Gemini | Harness::Codex | Harness::Unknown => {}
+        Harness::Oz
+        | Harness::OpenCode
+        | Harness::Gemini
+        | Harness::Codex
+        | Harness::Cursor
+        | Harness::Devin
+        | Harness::Unknown => {}
     }
 
     env_vars
