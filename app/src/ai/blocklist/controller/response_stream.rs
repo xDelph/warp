@@ -237,6 +237,7 @@ impl ResponseStreamId {
         Self(format!("local-{}", Uuid::new_v4()))
     }
 
+    #[cfg_attr(not(feature = "local_acp"), allow(dead_code))]
     pub(crate) fn is_local_acp(&self) -> bool {
         self.0.starts_with("local-")
     }

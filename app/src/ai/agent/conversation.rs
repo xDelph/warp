@@ -48,10 +48,11 @@ use crate::ai::agent::icons::{
 use crate::ai::agent::linearization::compute_task_depths;
 use crate::ai::agent::todos::AIAgentTodoList;
 use crate::ai::agent::{
-    AIAgentOutputMessage, AIAgentOutputMessageType, AIAgentText, AIAgentTextSection, AIIdentifiers,
-    AgentOutputText, CancellationOutcome, CancellationReason, MessageToAIAgentOutputMessageError,
-    SummarizationType,
+    AIAgentOutputMessage, AIAgentOutputMessageType, AIIdentifiers, CancellationOutcome,
+    CancellationReason, MessageToAIAgentOutputMessageError, SummarizationType,
 };
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::agent::{AIAgentText, AIAgentTextSection, AgentOutputText};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::{

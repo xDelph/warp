@@ -512,6 +512,7 @@ pub mod text {
                 AIAgentOutputMessageType::EventsFromAgents { event_ids } => {
                     writeln!(w, "Received {} agent events", event_ids.len())?;
                 }
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
                 AIAgentOutputMessageType::LocalAcpToolCall(tool_call) => {
                     writeln!(w, "Tool: {}", tool_call.title)?;
                 }
@@ -1183,8 +1184,9 @@ pub mod json {
                     })
                 }
                 AIAgentOutputMessageType::MessagesReceivedFromAgents { .. }
-                | AIAgentOutputMessageType::EventsFromAgents { .. }
-                | AIAgentOutputMessageType::LocalAcpToolCall(_) => None,
+                | AIAgentOutputMessageType::EventsFromAgents { .. } => None,
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                AIAgentOutputMessageType::LocalAcpToolCall(_) => None,
             }
         }
     }

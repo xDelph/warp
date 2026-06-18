@@ -132,19 +132,46 @@ pub(crate) fn context_window_tokens_for_selection(
     context_window_tokens_for_model(harness, model_id)
 }
 
-fn context_window_tokens_for_model(harness: Harness, model_id: Option<&str>) -> Option<u32> {
+fn context_window_tokens_for_model(harness: Harness, _model_id: Option<&str>) -> Option<u32> {
     match harness {
         Harness::Claude => Some(200_000),
-        Harness::Codex => Some(match model_id.unwrap_or_default() {
-            "gpt-5.4" | "gpt-5.3" | "gpt-5.2" | "gpt-5" => 400_000,
-            _ => 400_000,
-        }),
-        Harness::Gemini => Some(match model_id.unwrap_or_default() {
-            "gemini-2.5-pro" | "gemini-2.5-flash" => 1_000_000,
-            _ => 1_000_000,
-        }),
+        Harness::Codex => Some(400_000),
+        Harness::Gemini => Some(1_000_000),
         Harness::Cursor => Some(200_000),
         Harness::Devin => Some(200_000),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn discover_cursor_models() {
+        if super::super::path_search::resolve_command("cursor-acp").is_none() {
+            eprintln!("cursor-acp not installed, skipping");
+            return;
+        }
+        let models = discover_models_for_harness(Harness::Cursor).await;
+        match &models {
+            Ok(m) => eprintln!("Cursor models discovered: {m:?}"),
+            Err(e) => eprintln!("Cursor model discovery error: {e:#}"),
+        }
+        assert!(models.is_ok(), "Cursor ACP handshake failed: {}", models.unwrap_err());
+    }
+
+    #[tokio::test]
+    async fn discover_devin_models() {
+        if super::super::path_search::resolve_command("devin").is_none() {
+            eprintln!("devin not installed, skipping");
+            return;
+        }
+        let models = discover_models_for_harness(Harness::Devin).await;
+        match &models {
+            Ok(m) => eprintln!("Devin models discovered: {m:?}"),
+            Err(e) => eprintln!("Devin model discovery error: {e:#}"),
+        }
+        assert!(models.is_ok(), "Devin ACP handshake failed: {}", models.unwrap_err());
     }
 }
