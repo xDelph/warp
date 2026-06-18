@@ -407,6 +407,10 @@ async fn apply_session_preferences(
         } else {
             session.applied_model_id = Some(model_id.to_string());
         }
+    } else {
+        log::warn!(
+            "ACP agent exposes no model config option — model '{model_id}' was not applied"
+        );
     }
 
     Ok(())
@@ -469,7 +473,9 @@ async fn prompt_local_acp_session(
             }
             notification = notifications.next() => {
                 let Some(notification) = notification else {
-                    continue;
+                    // Notification stream ended; wait for prompt to finish.
+                    prompt.await?;
+                    break;
                 };
                 match notification.update {
                     acp::SessionUpdate::ToolCall(tool_call) => {

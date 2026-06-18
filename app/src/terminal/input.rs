@@ -176,9 +176,11 @@ use crate::ai::blocklist::{
     BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIHistoryEvent,
     BlocklistAIHistoryModel, BlocklistAIInputEvent, BlocklistAIInputModel, InputConfig, InputType,
     InputTypeAutoDetectionSource, PendingAttachment, PendingFile, QueuedQuery, QueuedQueryEvent,
-    QueuedQueryId, QueuedQueryModel, QueuedQueryOrigin, ResponseStreamId, SlashCommandRequest,
+    QueuedQueryId, QueuedQueryModel, QueuedQueryOrigin, SlashCommandRequest,
     BLOCK_CONTEXT_ATTACHMENT_REGEX, DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
 };
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};

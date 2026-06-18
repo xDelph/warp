@@ -2444,8 +2444,9 @@ impl AIBlock {
                 | AIAgentOutputMessageType::DebugOutput { .. }
                 | AIAgentOutputMessageType::ArtifactCreated(_)
                 | AIAgentOutputMessageType::SkillInvoked(_)
-                | AIAgentOutputMessageType::EventsFromAgents { .. }
-                | AIAgentOutputMessageType::LocalAcpToolCall(_) => {}
+                | AIAgentOutputMessageType::EventsFromAgents { .. } => {}
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                AIAgentOutputMessageType::LocalAcpToolCall(_) => {}
             }
         }
     }

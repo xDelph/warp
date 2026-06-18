@@ -24,9 +24,11 @@ use super::persistence::{PersistedAIInput, PersistedAIInputType};
 use super::RequestInput;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{
-    AIConversation, AIConversationId, ConversationStatus, LocalAcpStreamChunk,
-    ServerAIConversationMetadata, UpdateConversationError,
+    AIConversation, AIConversationId, ConversationStatus, ServerAIConversationMetadata,
+    UpdateConversationError,
 };
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::agent::conversation::LocalAcpStreamChunk;
 use crate::ai::agent::task::helper::{MessageExt, ToolCallExt};
 use crate::ai::agent::task::TaskId;
 use crate::ai::agent::{

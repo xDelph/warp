@@ -81,9 +81,11 @@ use crate::ai::blocklist::inline_action::ask_user_question_view::AskUserQuestion
 use crate::ai::blocklist::inline_action::aws_bedrock_credentials_error::AwsBedrockCredentialsErrorView;
 use crate::ai::blocklist::inline_action::create_or_edit_document::CreateOrEditDocumentAction;
 use crate::ai::blocklist::inline_action::inline_action_header::{
-    HeaderConfig, InteractionMode, ICON_MARGIN, INLINE_ACTION_HEADER_VERTICAL_PADDING,
+    HeaderConfig, InteractionMode, INLINE_ACTION_HEADER_VERTICAL_PADDING,
     INLINE_ACTION_HORIZONTAL_PADDING,
 };
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::inline_action::inline_action_header::ICON_MARGIN;
 use crate::ai::blocklist::inline_action::inline_action_icons::{self, icon_size};
 use crate::ai::blocklist::inline_action::requested_action::{
     render_requested_action_body_text, render_requested_action_row_for_text, RenderableAction,

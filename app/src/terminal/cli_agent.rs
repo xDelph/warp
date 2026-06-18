@@ -96,7 +96,7 @@ const AUGGIE_COLOR: ColorU = ColorU {
 };
 
 /// Cursor brand color (#26251E, from official brand assets)
-const CURSOR_COLOR: ColorU = ColorU {
+pub(crate) const CURSOR_COLOR: ColorU = ColorU {
     r: 38,
     g: 37,
     b: 30,

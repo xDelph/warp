@@ -11,7 +11,7 @@ use warp_core::ui::theme::{Fill as WarpThemeFill, WarpTheme};
 
 use crate::ai::agent::conversation::AIAgentHarness;
 use crate::ai::blocklist::CLAUDE_ORANGE;
-use crate::terminal::cli_agent::{GEMINI_BLUE, OPENAI_COLOR, OPENCODE_COLOR};
+use crate::terminal::cli_agent::{CURSOR_COLOR, GEMINI_BLUE, OPENAI_COLOR, OPENCODE_COLOR};
 use crate::ui_components::icons::Icon;
 
 /// User-visible display name for a [`Harness`].
@@ -36,7 +36,8 @@ pub fn icon_for(harness: Harness) -> Icon {
         Harness::OpenCode => Icon::OpenCodeLogo,
         Harness::Gemini => Icon::GeminiLogo,
         Harness::Codex => Icon::OpenAILogo,
-        Harness::Cursor | Harness::Devin => Icon::AgentMode,
+        Harness::Cursor => Icon::CursorLogo,
+        Harness::Devin => Icon::AgentMode,
         Harness::Unknown => Icon::HelpCircle,
     }
 }
@@ -50,8 +51,8 @@ pub fn brand_color(harness: Harness) -> Option<ColorU> {
         Harness::OpenCode => None,
         Harness::Gemini => Some(GEMINI_BLUE),
         Harness::Codex => Some(OPENAI_COLOR),
-        Harness::Cursor | Harness::Devin => None,
-        Harness::Unknown => None,
+        Harness::Cursor => Some(CURSOR_COLOR),
+        Harness::Devin | Harness::Unknown => None,
     }
 }
 
@@ -64,7 +65,8 @@ pub fn circle_background(harness: Harness, theme: &WarpTheme) -> WarpThemeFill {
         Harness::Codex => WarpThemeFill::Solid(OPENAI_COLOR),
         Harness::Gemini => WarpThemeFill::Solid(GEMINI_BLUE),
         Harness::OpenCode => WarpThemeFill::Solid(OPENCODE_COLOR),
-        Harness::Cursor | Harness::Devin => internal_colors::fg_overlay_2(theme),
+        Harness::Cursor => WarpThemeFill::Solid(CURSOR_COLOR),
+        Harness::Devin => internal_colors::fg_overlay_2(theme),
         Harness::Unknown => internal_colors::fg_overlay_2(theme),
     }
 }

@@ -194,6 +194,7 @@ impl HarnessAvailabilityModel {
 
     #[allow(dead_code)]
     pub fn models_for_picker(&self, harness: Harness) -> Vec<HarnessModelInfo> {
+        #[allow(unused_mut)]
         let mut models = self.models_for(harness).unwrap_or_default().to_vec();
 
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
