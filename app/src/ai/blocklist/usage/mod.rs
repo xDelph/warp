@@ -5,6 +5,17 @@ use warpui::Element;
 pub mod conversation_usage_view;
 pub mod rollup;
 
+/// Returns true when context usage is high enough to warrant a warning style.
+pub fn is_high_context_window_usage(context_window_usage: f32) -> bool {
+    context_window_usage >= 0.8
+}
+
+/// Compact label for the agent footer context-usage chip.
+pub fn format_context_window_remaining_label(context_window_usage: f32) -> String {
+    let remaining_pct = ((1.0 - context_window_usage.clamp(0.0, 1.0)) * 100.0).round() as i32;
+    format!("{remaining_pct}% context left")
+}
+
 pub fn icon_for_context_window_usage(context_window_usage: f32) -> Icon {
     // Match the context window usage to the nearest 10% icon.
     if context_window_usage >= 0.95 {
