@@ -852,12 +852,22 @@ impl AgentInputFooter {
         ctx.subscribe_to_model(&AIRequestUsageModel::handle(ctx), |_, _, _, ctx| {
             ctx.notify()
         });
-        ctx.subscribe_to_model(&AISettings::handle(ctx), |_, _, event, ctx| {
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
             if matches!(
                 event,
                 AISettingsChangedEvent::AIAutoDetectionEnabled { .. }
                     | AISettingsChangedEvent::ShouldForceDisableCloudHandoff { .. }
+                    | AISettingsChangedEvent::LocalAcpEnabled { .. }
             ) {
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. })
+                    && crate::ai::local_acp::local_acp_enabled(ctx)
+                {
+                    LocalAcpHarnessModel::handle(ctx).update(ctx, |state, ctx| {
+                        state.ensure_all_models_discovered(ctx);
+                    });
+                    me.refresh_local_acp_openusage_summary(ctx);
+                }
                 ctx.notify()
             }
         });
@@ -1027,7 +1037,7 @@ impl AgentInputFooter {
         me.sync_fast_forward_button(ctx);
         me.sync_remote_control_button(ctx);
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-        {
+        if crate::ai::local_acp::local_acp_enabled(ctx) {
             LocalAcpHarnessModel::handle(ctx).update(ctx, |state, ctx| {
                 state.ensure_all_models_discovered(ctx);
             });
@@ -2173,13 +2183,17 @@ impl AgentInputFooter {
         {
             let (usage, tooltip) = {
                 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                {
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
                     self.local_acp_context_window_usage(&conversation, ctx)
                         .unwrap_or_else(|| {
                             let usage = conversation.context_window_usage();
                             let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
                             (usage, format!("{remaining_pct}% context remaining"))
                         })
+                } else {
+                    let usage = conversation.context_window_usage();
+                    let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+                    (usage, format!("{remaining_pct}% context remaining"))
                 }
                 #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
                 {
@@ -2368,7 +2382,7 @@ impl AgentInputFooter {
             }
             AgentToolbarItemKind::ModelSelector => {
                 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                {
+                if crate::ai::local_acp::local_acp_enabled(app) {
                     return Some(
                         Flex::row()
                             .with_main_axis_size(MainAxisSize::Min)
@@ -2379,12 +2393,9 @@ impl AgentInputFooter {
                             .finish(),
                     );
                 }
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                {
-                    let show = FeatureFlag::ProfilesDesignRevamp.is_enabled()
-                        || *SessionSettings::as_ref(app).show_model_selectors_in_prompt;
-                    show.then(|| ChildView::new(&self.model_selector).finish())
-                }
+                let show = FeatureFlag::ProfilesDesignRevamp.is_enabled()
+                    || *SessionSettings::as_ref(app).show_model_selectors_in_prompt;
+                show.then(|| ChildView::new(&self.model_selector).finish())
             }
             AgentToolbarItemKind::NLDToggle => Some(ChildView::new(&self.nld_button).finish()),
             AgentToolbarItemKind::VoiceInput => {

@@ -1,5 +1,6 @@
-use anyhow::Result;
 use std::path::PathBuf;
+
+use anyhow::Result;
 use warp_cli::agent::Harness;
 use warpui::{EntityId, ModelContext, SingletonEntity, View, ViewContext};
 

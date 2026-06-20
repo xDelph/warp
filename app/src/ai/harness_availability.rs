@@ -148,15 +148,12 @@ impl HarnessAvailabilityModel {
     }
 
     #[allow(dead_code)]
-    pub fn harnesses_for_selector(&self) -> Vec<HarnessAvailability> {
+    pub fn harnesses_for_selector(&self, ctx: &warpui::AppContext) -> Vec<HarnessAvailability> {
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-        {
-            local_acp_harnesses()
+        if crate::ai::local_acp::local_acp_enabled(ctx) {
+            return local_acp_harnesses();
         }
-        #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-        {
-            self.harnesses.clone()
-        }
+        self.harnesses.clone()
     }
 
     pub fn display_name_for(&self, harness: Harness) -> &str {
@@ -193,12 +190,16 @@ impl HarnessAvailabilityModel {
     }
 
     #[allow(dead_code)]
-    pub fn models_for_picker(&self, harness: Harness) -> Vec<HarnessModelInfo> {
+    pub fn models_for_picker(
+        &self,
+        harness: Harness,
+        ctx: &warpui::AppContext,
+    ) -> Vec<HarnessModelInfo> {
         #[allow(unused_mut)]
         let mut models = self.models_for(harness).unwrap_or_default().to_vec();
 
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-        {
+        if crate::ai::local_acp::local_acp_enabled(ctx) {
             for model in acp_models::default_models_for_harness(harness) {
                 if models.iter().any(|existing| existing.id == model.id) {
                     continue;

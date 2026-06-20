@@ -40,7 +40,7 @@ use crate::ai::request_usage_model::{
 };
 use crate::auth::auth_manager::AuthManager;
 use crate::search::slash_command_menu::static_commands::commands;
-use crate::settings::AISettings;
+use crate::settings::{AISettings, AISettingsChangedEvent};
 use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
 use crate::terminal::input::message_bar::attached_context::{
     AttachedBlocksMessageProducer, AttachedContextArgs, AttachedTextSelectionMessageProducer,
@@ -255,7 +255,13 @@ impl AgentMessageBar {
             }
         });
 
-        let message_bar = Self {
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |_, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                ctx.notify();
+            }
+        });
+
+        Self {
             agent_view_controller,
             ephemeral_message_model,
             shortcut_view_model,
@@ -402,6 +408,11 @@ impl View for AgentMessageBar {
         };
 
         let right_element = if cfg!(target_family = "wasm") {
+            None
+        } else if cfg!(all(feature = "local_acp", not(target_family = "wasm")))
+            && crate::ai::local_acp::cloud_agent_disabled(app)
+        {
+            // When local ACP is on, OEM cloud-agent banner is suppressed.
             None
         } else if let Some(message) = PricingPromotionState::as_ref(app)
             .visible_message(PricingPromotionSurface::AgentMessageBar, app)
@@ -667,9 +678,10 @@ impl MessageProvider<AgentMessageArgs<'_>> for ZeroStateMessageProducer {
         let is_cloud_agent = is_in_cloud_context(terminal_model);
         let ai_settings = AISettings::as_ref(app);
 
-        // Handoff to cloud only available for local agents.
-        #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-        if !is_cloud_agent && ai_settings.is_ampersand_handoff_enabled(app) {
+        if !is_cloud_agent
+            && !crate::ai::local_acp::cloud_agent_disabled(app)
+            && ai_settings.is_ampersand_handoff_enabled(app)
+        {
             items.push(
                 MessageItem::clickable(
                     vec![

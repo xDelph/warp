@@ -21822,6 +21822,9 @@ impl TerminalView {
                 stream_id,
                 terminal_view_id,
             } => {
+                if !crate::ai::local_acp::local_acp_enabled(ctx) {
+                    return;
+                }
                 if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(
                     prompt.clone(),
                     *harness,
@@ -21850,8 +21853,7 @@ impl TerminalView {
                 });
             }
             InputEvent::SubmitCloudFollowup { prompt } => {
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                {
+                if crate::ai::local_acp::cloud_agent_disabled(ctx) {
                     let _ = prompt;
                     self.show_error_toast(
                         "Cloud task continuation is unavailable.".to_string(),
@@ -21859,13 +21861,11 @@ impl TerminalView {
                     );
                     return;
                 }
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
                 if FeatureFlag::HandoffCloudCloud.is_enabled()
                     && self.try_submit_pending_cloud_followup(prompt.clone(), ctx)
                 {
                     return;
                 }
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
                 self.show_error_toast("Couldn't continue this cloud task.".to_string(), ctx);
             }
             InputEvent::CancelSharedSessionConversation {
@@ -21938,16 +21938,17 @@ impl TerminalView {
                 }
             },
             InputEvent::EnterCloudAgentView { initial_prompt } => {
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                self.enter_agent_view_for_new_conversation(
-                    initial_prompt.clone(),
-                    AgentViewEntryOrigin::Input {
-                        was_prompt_autodetected: false,
-                    },
-                    ctx,
-                );
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                self.enter_cloud_agent_view(initial_prompt.clone(), ctx);
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
+                    self.enter_agent_view_for_new_conversation(
+                        initial_prompt.clone(),
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    );
+                } else {
+                    self.enter_cloud_agent_view(initial_prompt.clone(), ctx);
+                }
             }
             InputEvent::CreateDockerSandbox => {
                 if !FeatureFlag::LocalDockerSandbox.is_enabled() {
@@ -28034,16 +28035,17 @@ impl TypedActionView for TerminalView {
                 let mut draft_text = self.input.as_ref(ctx).buffer_text(ctx);
                 draft_text.truncate(draft_text.trim_end().len());
                 let initial_prompt = (!draft_text.trim().is_empty()).then_some(draft_text);
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                self.enter_agent_view_for_new_conversation(
-                    initial_prompt,
-                    AgentViewEntryOrigin::Input {
-                        was_prompt_autodetected: false,
-                    },
-                    ctx,
-                );
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                self.enter_cloud_agent_view(initial_prompt, ctx);
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
+                    self.enter_agent_view_for_new_conversation(
+                        initial_prompt,
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    );
+                } else {
+                    self.enter_cloud_agent_view(initial_prompt, ctx);
+                }
             }
             StartNewAgentConversation { origin } => {
                 self.input.update(ctx, |input, ctx| {

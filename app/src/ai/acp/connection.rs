@@ -3,7 +3,9 @@
 //! Based on `acpx` but auto-approves `session/request_permission` so local agents
 //! can run tools without blocking on a client that doesn't implement the UI yet.
 
-use std::{cell::RefCell, io::ErrorKind, rc::Rc};
+use std::cell::RefCell;
+use std::io::ErrorKind;
+use std::rc::Rc;
 
 use acpx::{Error, Result, RuntimeContext};
 use agent_client_protocol::{self as acp, Agent as _};
@@ -175,21 +177,30 @@ impl Connection {
         &self,
         args: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse> {
-        self.connection()?.initialize(args).await.map_err(Error::from)
+        self.connection()?
+            .initialize(args)
+            .await
+            .map_err(Error::from)
     }
 
     pub(crate) async fn authenticate(
         &self,
         args: acp::AuthenticateRequest,
     ) -> Result<acp::AuthenticateResponse> {
-        self.connection()?.authenticate(args).await.map_err(Error::from)
+        self.connection()?
+            .authenticate(args)
+            .await
+            .map_err(Error::from)
     }
 
     pub(crate) async fn new_session(
         &self,
         args: acp::NewSessionRequest,
     ) -> Result<acp::NewSessionResponse> {
-        self.connection()?.new_session(args).await.map_err(Error::from)
+        self.connection()?
+            .new_session(args)
+            .await
+            .map_err(Error::from)
     }
 
     pub(crate) async fn set_session_mode(
@@ -217,7 +228,10 @@ impl Connection {
     }
 
     pub(crate) async fn ext_method(&self, args: acp::ExtRequest) -> Result<acp::ExtResponse> {
-        self.connection()?.ext_method(args).await.map_err(Error::from)
+        self.connection()?
+            .ext_method(args)
+            .await
+            .map_err(Error::from)
     }
 
     fn connection(&self) -> Result<Rc<acp::ClientSideConnection>> {

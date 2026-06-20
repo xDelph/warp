@@ -175,6 +175,8 @@ use crate::ai::blocklist::handoff::{
 };
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::blocklist::{
     AttachmentType, BLOCK_CONTEXT_ATTACHMENT_REGEX, BlocklistAIActionModel,
     BlocklistAIContextEvent, BlocklistAIContextModel, BlocklistAIController,
@@ -185,8 +187,6 @@ use crate::ai::blocklist::{
     QueuedQueryOrigin, SlashCommandRequest, ai_brand_color, ai_indicator_height,
     render_ai_agent_mode_icon, render_ai_follow_up_icon,
 };
-#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::connected_self_hosted_workers::{
@@ -14703,7 +14703,8 @@ impl Input {
         }
 
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-        if crate::ai::acp::local_acp_enabled() && self.agent_view_controller.as_ref(ctx).is_active()
+        if crate::ai::local_acp::local_acp_enabled(ctx)
+            && self.agent_view_controller.as_ref(ctx).is_active()
         {
             let ai_query = self.editor.as_ref(ctx).buffer_text(ctx);
             if ai_query.is_empty() {
@@ -16594,14 +16595,13 @@ impl TypedActionView for Input {
             }
             InputAction::OpenModelSelector => {
                 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                {
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
                     self.close_overlays(false, ctx);
                     self.agent_input_footer.update(ctx, |footer, ctx| {
                         footer.open_local_acp_model_selector(ctx);
                     });
                     return;
                 }
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
                 self.open_model_selector_and_snapshot_prompt(
                     InlineModelSelectorTab::BaseAgent,
                     ctx,

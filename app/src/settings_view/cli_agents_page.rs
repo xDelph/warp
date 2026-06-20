@@ -26,13 +26,13 @@ use warpui::{
 };
 
 use super::ai_shared::{
-    render_ai_feature_switch, render_ai_setting_toggle, render_toolbar_layout_editor, styles,
-    update_editor_interaction_state,
+    render_ai_feature_switch, render_ai_setting_description, render_ai_setting_toggle,
+    render_toolbar_layout_editor, styles, update_editor_interaction_state,
 };
 use super::settings_page::{
-    AdditionalInfo, CONTENT_FONT_SIZE, LocalOnlyIconState, MatchData, PageTitle, PageType,
-    SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState, build_toggle_element,
-    render_body_item_label,
+    AdditionalInfo, CONTENT_FONT_SIZE, HEADER_PADDING, LocalOnlyIconState, MatchData, PageTitle,
+    PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState,
+    build_sub_header, build_toggle_element, render_body_item_label, render_separator,
 };
 use super::{SettingsAction, SettingsSection, ToggleSettingActionPair, flags};
 use crate::ai::blocklist::agent_view::agent_input_footer::editor::{
@@ -42,8 +42,8 @@ use crate::appearance::Appearance;
 use crate::menu::{MenuItem, MenuItemFields};
 use crate::settings::{
     AISettings, AISettingsChangedEvent, AutoDismissRichInputAfterSubmit,
-    AutoOpenRichInputOnCLIAgentStart, AutoToggleRichInput, ShouldRenderCLIAgentToolbar,
-    SubmitRichInputOnCtrlEnter,
+    AutoOpenRichInputOnCLIAgentStart, AutoToggleRichInput, LocalAcpEnabled,
+    ShouldRenderCLIAgentToolbar, SubmitRichInputOnCtrlEnter,
 };
 use crate::terminal::CLIAgent;
 use crate::util::bindings;
@@ -133,6 +133,8 @@ impl CLIAgentsPageView {
             Box::new(CLIAgentSubmitRichInputWidget::default()),
             Box::new(CLIAgentCommandsWidget),
             Box::new(CLIAgentToolbarLayoutWidget),
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            Box::new(LocalAcpWidget::default()),
         ];
         PageType::new_uncategorized(widgets, Some(PageTitle::new(PAGE_TITLE)))
     }
@@ -243,6 +245,8 @@ pub enum CLIAgentsPageAction {
         pattern: String,
         agent: Option<CLIAgent>,
     },
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    ToggleLocalAcp,
 }
 
 impl TypedActionView for CLIAgentsPageView {
@@ -311,6 +315,13 @@ impl TypedActionView for CLIAgentsPageView {
                 AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     settings.set_cli_agent_for_command(pattern, *agent, ctx);
                 });
+            }
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            CLIAgentsPageAction::ToggleLocalAcp => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.local_acp_enabled.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
             }
         }
     }
@@ -813,5 +824,57 @@ impl SettingsWidget for CLIAgentToolbarLayoutWidget {
         }
 
         render_toolbar_layout_editor(&view.cli_agent_toolbar_inline_editor, appearance)
+    }
+}
+
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+#[derive(Default)]
+struct LocalAcpWidget {
+    toggle: SwitchStateHandle,
+}
+
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+impl SettingsWidget for LocalAcpWidget {
+    type View = CLIAgentsPageView;
+
+    fn search_terms(&self) -> &str {
+        "local acp agent claude codex gemini cursor devin oz subprocess third party harness"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let ai_settings = AISettings::as_ref(app);
+        let is_any_ai_enabled = ai_settings.is_any_ai_enabled(app);
+
+        Flex::column()
+            .with_child(render_separator(appearance))
+            .with_child(
+                build_sub_header(
+                    appearance,
+                    "Local ACP agents",
+                    Some(styles::header_font_color(is_any_ai_enabled, app)),
+                )
+                .with_padding_bottom(HEADER_PADDING)
+                .finish(),
+            )
+            .with_child(render_ai_setting_toggle::<LocalAcpEnabled>(
+                "Use local ACP agents instead of Oz",
+                CLIAgentsPageAction::ToggleLocalAcp,
+                *ai_settings.local_acp_enabled,
+                is_any_ai_enabled,
+                self.toggle.clone(),
+                &view.local_only_icon_tooltip_states,
+                app,
+            ))
+            .with_child(render_ai_setting_description(
+                "Route agent conversations through local ACP subprocesses (Claude, Codex, Gemini, Cursor, Devin) instead of Warp server-side Oz.",
+                is_any_ai_enabled,
+                app,
+            ))
+            .finish()
     }
 }

@@ -4,19 +4,20 @@ use std::sync::Arc;
 use std::thread;
 
 use acpx::RuntimeContext;
-use agent_client_protocol as acp;
 use anyhow::{anyhow, Context, Result};
 use async_process::Command;
-use async_channel;
 use futures::StreamExt;
 use serde_json::{json, Map, Value};
 use tokio::sync::{mpsc, oneshot};
 use warp_cli::agent::Harness;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
+use {agent_client_protocol as acp, async_channel};
 
-use super::{connection::Connection, path_search, registry, session_store::LocalAcpSessionStore, tool_calls};
-use crate::ai::agent::local_acp_tool_call::LocalAcpToolCallMessage;
+use super::connection::Connection;
+use super::session_store::LocalAcpSessionStore;
+use super::{path_search, registry, tool_calls};
 use crate::ai::agent::conversation::{AIConversationId, LocalAcpStreamChunk};
+use crate::ai::agent::local_acp_tool_call::LocalAcpToolCallMessage;
 use crate::ai::agent::RenderableAIError;
 use crate::ai::blocklist::{BlocklistAIHistoryModel, ResponseStreamId};
 
@@ -103,10 +104,7 @@ impl LocalAcpSubmitModel {
                 me.active_submission = None;
                 match result {
                     Ok(result) => {
-                        log::info!(
-                            "Local ACP session {} completed",
-                            result.session_id,
-                        );
+                        log::info!("Local ACP session {} completed", result.session_id,);
                         LocalAcpSessionStore::handle(ctx).update(ctx, |store, _ctx| {
                             store.set_session_id(
                                 completion_request.harness,
@@ -234,9 +232,12 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
     let mut session = None;
 
     while let Some(worker_request) = rx.recv().await {
-        let result =
-            submit_local_acp_query_on_worker(&mut session, worker_request.request, worker_request.stream_tx)
-                .await;
+        let result = submit_local_acp_query_on_worker(
+            &mut session,
+            worker_request.request,
+            worker_request.stream_tx,
+        )
+        .await;
         if result.is_err() {
             if let Some(session) = session.take() {
                 if let Err(error) = session.connection.close().await {
@@ -266,12 +267,7 @@ async fn submit_local_acp_query_on_worker(
     let session = session
         .as_mut()
         .expect("local ACP session exists after initialization");
-    apply_session_preferences(
-        request.harness,
-        request.model_id.as_deref(),
-        session,
-    )
-    .await?;
+    apply_session_preferences(request.harness, request.model_id.as_deref(), session).await?;
 
     prompt_local_acp_session(session, request, stream_tx).await
 }
@@ -314,9 +310,7 @@ async fn start_local_acp_session(request: &LocalAcpSubmitRequest) -> Result<Loca
         }
     }
 
-    let session = connection
-        .new_session(new_session_request(request))
-        .await?;
+    let session = connection.new_session(new_session_request(request)).await?;
     let session_id = session.session_id.clone();
     let config_options = session.config_options.clone();
 
@@ -343,8 +337,8 @@ async fn apply_session_preferences(
     session: &mut LocalAcpWorkerSession,
 ) -> Result<()> {
     if let Some(mode_id) = registry::default_session_mode(harness) {
-        let should_apply_mode = harness == Harness::Cursor
-            || session.applied_mode.as_deref() != Some(mode_id);
+        let should_apply_mode =
+            harness == Harness::Cursor || session.applied_mode.as_deref() != Some(mode_id);
         if should_apply_mode {
             match session
                 .connection
@@ -358,7 +352,9 @@ async fn apply_session_preferences(
                     session.applied_mode = Some(mode_id.to_string());
                 }
                 Err(error) => {
-                    log::debug!("ACP agent did not accept session mode via set_session_mode: {error:#}");
+                    log::debug!(
+                        "ACP agent did not accept session mode via set_session_mode: {error:#}"
+                    );
                     if let Err(error) = session
                         .connection
                         .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
@@ -408,9 +404,7 @@ async fn apply_session_preferences(
             session.applied_model_id = Some(model_id.to_string());
         }
     } else {
-        log::warn!(
-            "ACP agent exposes no model config option — model '{model_id}' was not applied"
-        );
+        log::warn!("ACP agent exposes no model config option — model '{model_id}' was not applied");
     }
 
     Ok(())
