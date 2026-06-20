@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use warp_cli::agent::Harness;
-
 use acpx::RuntimeContext;
 use agent_client_protocol as acp;
 use anyhow::{anyhow, Context, Result};
 use async_process::Command;
+use warp_cli::agent::Harness;
 
-use super::{connection::Connection, path_search, registry};
+use super::connection::Connection;
+use super::{path_search, registry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalAcpModelInfo {
@@ -158,7 +158,11 @@ mod tests {
             Ok(m) => eprintln!("Cursor models discovered: {m:?}"),
             Err(e) => eprintln!("Cursor model discovery error: {e:#}"),
         }
-        assert!(models.is_ok(), "Cursor ACP handshake failed: {}", models.unwrap_err());
+        assert!(
+            models.is_ok(),
+            "Cursor ACP handshake failed: {}",
+            models.unwrap_err()
+        );
     }
 
     #[tokio::test]
@@ -172,6 +176,10 @@ mod tests {
             Ok(m) => eprintln!("Devin models discovered: {m:?}"),
             Err(e) => eprintln!("Devin model discovery error: {e:#}"),
         }
-        assert!(models.is_ok(), "Devin ACP handshake failed: {}", models.unwrap_err());
+        assert!(
+            models.is_ok(),
+            "Devin ACP handshake failed: {}",
+            models.unwrap_err()
+        );
     }
 }

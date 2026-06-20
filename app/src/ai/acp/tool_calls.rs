@@ -88,7 +88,10 @@ fn body_from_tool_fields(
 ) -> AIAgentText {
     let mut sections = Vec::new();
     if let Some(input) = raw_input.and_then(format_json_value) {
-        sections.push(text_section(format!("**Input**\n\n{}", fenced_code_block("json", &input))));
+        sections.push(text_section(format!(
+            "**Input**\n\n{}",
+            fenced_code_block("json", &input)
+        )));
     }
     if let Some(output) = raw_output.and_then(format_json_value) {
         sections.push(text_section(format!(
@@ -184,10 +187,10 @@ mod tests {
 
     #[test]
     fn wraps_json_tool_output_in_code_fence() {
-        let tool_call = acp::ToolCall::new("tool-2", "grep")
-            .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
-                acp::TextContent::new(r#"{"success":true}"#),
-            ))]);
+        let tool_call =
+            acp::ToolCall::new("tool-2", "grep").content(vec![acp::ToolCallContent::from(
+                acp::ContentBlock::Text(acp::TextContent::new(r#"{"success":true}"#)),
+            )]);
 
         let message = message_from_tool_call(tool_call);
         assert!(message.body_plain_text().contains("```json"));

@@ -146,7 +146,10 @@ mod tests {
         assert_eq!(lines[0], "Total usage: 81% left");
         assert_eq!(lines[1], "Auto usage: 76% left");
         assert_eq!(lines[2], "API usage: 100% left");
-        assert_eq!(lines.join("\n"), "Total usage: 81% left\nAuto usage: 76% left\nAPI usage: 100% left");
+        assert_eq!(
+            lines.join("\n"),
+            "Total usage: 81% left\nAuto usage: 76% left\nAPI usage: 100% left"
+        );
         assert_eq!(usage_fraction, Some(0.19));
     }
 }

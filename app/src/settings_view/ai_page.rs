@@ -82,12 +82,13 @@ use crate::settings::{
     AgentModeCommandExecutionPredicate, AgentModeQuerySuggestionsEnabled, AwsBedrockAutoLogin,
     AwsBedrockCredentialsEnabled, CanUseWarpCreditsForFallback, CodeSettings,
     CodebaseContextEnabled, FileBasedMcpEnabled, GitOperationsAutogenEnabled,
-    IncludeAgentCommandsInHistory, InputSettings, IntelligentAutosuggestionsEnabled, MemoryEnabled,
-    NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled, OrchestrationMessageDisplayMode,
-    PromptSubmissionMode, RuleSuggestionsEnabled, SharedBlockTitleGenerationEnabled,
-    ShouldRenderCLIAgentToolbar, ShouldRenderUseAgentToolbarForUserCommands,
-    ShouldShowOzUpdatesInZeroState, ShowAgentTips, ShowConversationHistory, ShowHintText,
-    ThinkingDisplayMode, VoiceInputEnabled, WarpDriveContextEnabled,
+    IncludeAgentCommandsInHistory, InputSettings, IntelligentAutosuggestionsEnabled,
+    LocalAcpEnabled, MemoryEnabled, NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled,
+    OrchestrationMessageDisplayMode, PromptSubmissionMode, RuleSuggestionsEnabled,
+    SharedBlockTitleGenerationEnabled, ShouldRenderCLIAgentToolbar,
+    ShouldRenderUseAgentToolbarForUserCommands, ShouldShowOzUpdatesInZeroState, ShowAgentTips,
+    ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
+    WarpDriveContextEnabled,
 };
 use crate::terminal::session_settings::{SessionSettings, SessionSettingsChangedEvent};
 use crate::terminal::CLIAgent;
@@ -2285,6 +2286,8 @@ impl AISettingsPageView {
                 if FeatureFlag::AgentModeComputerUse.is_enabled() {
                     widgets.push(Box::new(CloudAgentComputerUseWidget::default()));
                 }
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                widgets.push(Box::new(LocalAcpWidget::default()));
             }
             Some(AISubpage::WarpAgent) => {
                 // Oz page: global toggle + Active AI + Input + Other
@@ -2326,6 +2329,8 @@ impl AISettingsPageView {
                 if FeatureFlag::AgentModeComputerUse.is_enabled() {
                     widgets.push(Box::new(CloudAgentComputerUseWidget::default()));
                 }
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                widgets.push(Box::new(LocalAcpWidget::default()));
             }
             Some(AISubpage::Profiles) => {
                 if !FeatureFlag::UsageBasedPricing.is_enabled() {
@@ -3047,6 +3052,7 @@ pub enum AISettingsPageAction {
     ToggleAwsBedrockCredentialsEnabled,
     RefreshAwsBedrockCredentials,
     ToggleCloudAgentComputerUse,
+    ToggleLocalAcp,
     ToggleFileBasedMcp,
     ToggleIncludeAgentCommandsInHistory,
     ToggleAgentAttribution,
@@ -3783,6 +3789,12 @@ impl TypedActionView for AISettingsPageView {
                     report_if_error!(settings
                         .cloud_agent_computer_use_enabled
                         .toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            AISettingsPageAction::ToggleLocalAcp => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.local_acp_enabled.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -7240,6 +7252,58 @@ impl SettingsWidget for CloudAgentComputerUseWidget {
             .with_child(render_ai_setting_description(
                 "Enable computer use in cloud agent conversations started from the Warp app.",
                 !is_disabled,
+                app,
+            ))
+            .finish()
+    }
+}
+
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+#[derive(Default)]
+struct LocalAcpWidget {
+    toggle: SwitchStateHandle,
+}
+
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+impl SettingsWidget for LocalAcpWidget {
+    type View = AISettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "local acp agent claude codex gemini cursor devin oz subprocess third party harness"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let ai_settings = AISettings::as_ref(app);
+        let is_any_ai_enabled = ai_settings.is_any_ai_enabled(app);
+
+        Flex::column()
+            .with_child(render_separator(appearance))
+            .with_child(
+                build_sub_header(
+                    appearance,
+                    "Local ACP agents",
+                    Some(styles::header_font_color(is_any_ai_enabled, app)),
+                )
+                .with_padding_bottom(HEADER_PADDING)
+                .finish(),
+            )
+            .with_child(render_ai_setting_toggle::<LocalAcpEnabled>(
+                "Use local ACP agents instead of Oz",
+                AISettingsPageAction::ToggleLocalAcp,
+                *ai_settings.local_acp_enabled,
+                is_any_ai_enabled,
+                self.toggle.clone(),
+                &view.local_only_icon_tooltip_states,
+                app,
+            ))
+            .with_child(render_ai_setting_description(
+                "Route agent conversations through local ACP subprocesses (Claude, Codex, Gemini, Cursor, Devin) instead of Warp server-side Oz.",
+                is_any_ai_enabled,
                 app,
             ))
             .finish()

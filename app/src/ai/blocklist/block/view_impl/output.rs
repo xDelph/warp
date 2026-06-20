@@ -80,12 +80,12 @@ use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::ai::blocklist::inline_action::ask_user_question_view::AskUserQuestionView;
 use crate::ai::blocklist::inline_action::aws_bedrock_credentials_error::AwsBedrockCredentialsErrorView;
 use crate::ai::blocklist::inline_action::create_or_edit_document::CreateOrEditDocumentAction;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::inline_action::inline_action_header::ICON_MARGIN;
 use crate::ai::blocklist::inline_action::inline_action_header::{
     HeaderConfig, InteractionMode, INLINE_ACTION_HEADER_VERTICAL_PADDING,
     INLINE_ACTION_HORIZONTAL_PADDING,
 };
-#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-use crate::ai::blocklist::inline_action::inline_action_header::ICON_MARGIN;
 use crate::ai::blocklist::inline_action::inline_action_icons::{self, icon_size};
 use crate::ai::blocklist::inline_action::requested_action::{
     render_requested_action_body_text, render_requested_action_row_for_text, RenderableAction,
@@ -3607,14 +3607,10 @@ fn render_local_acp_tool_call(
                     .with_cross_axis_alignment(CrossAxisAlignment::Start)
                     .with_child(status_icon_element)
                     .with_child(
-                        Text::new(
-                            tool_call.title.clone(),
-                            title_font,
-                            title_size,
-                        )
-                        .with_color(text_color)
-                        .with_selectable(true)
-                        .finish(),
+                        Text::new(tool_call.title.clone(), title_font, title_size)
+                            .with_color(text_color)
+                            .with_selectable(true)
+                            .finish(),
                     )
                     .finish(),
             )
@@ -3703,9 +3699,7 @@ fn render_local_acp_tool_call(
             current_working_directory: props.current_working_directory,
             shell_launch_data: props.shell_launch_data,
             embedded_code_editor_views: props.editor_views,
-            code_snippet_button_handles: &props
-                .state_handles
-                .normal_response_code_snippet_buttons,
+            code_snippet_button_handles: &props.state_handles.normal_response_code_snippet_buttons,
             table_section_handles: &props.state_handles.table_section_handles,
             image_section_tooltip_handles: &props.state_handles.image_section_tooltip_handles,
             is_ai_input_enabled: props.is_ai_input_enabled,
@@ -3738,12 +3732,7 @@ fn render_local_acp_tool_call(
         );
     }
 
-    Some(
-        column
-            .finish()
-            .with_agent_output_item_spacing(app)
-            .finish(),
-    )
+    Some(column.finish().with_agent_output_item_spacing(app).finish())
 }
 
 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]

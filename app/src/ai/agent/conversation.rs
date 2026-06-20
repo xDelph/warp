@@ -2118,7 +2118,10 @@ impl AIConversation {
                             let AIAgentOutputMessage {
                                 message: AIAgentOutputMessageType::Reasoning { text, .. },
                                 ..
-                            } = output.messages.last_mut().expect("reasoning message exists")
+                            } = output
+                                .messages
+                                .last_mut()
+                                .expect("reasoning message exists")
                             else {
                                 unreachable!("last message must be reasoning");
                             };
@@ -2288,8 +2291,7 @@ impl AIConversation {
             let finish_time = Local::now();
             for message in &mut output.messages {
                 if let AIAgentOutputMessageType::Reasoning {
-                    finished_duration,
-                    ..
+                    finished_duration, ..
                 } = &mut message.message
                 {
                     if finished_duration.is_none() {

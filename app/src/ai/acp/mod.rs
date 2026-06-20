@@ -11,9 +11,5 @@ pub(crate) mod session_store;
 pub(crate) mod slash_commands;
 pub(crate) mod submit;
 pub(crate) mod submit_model;
-pub(crate) mod tool_calls;
 pub(crate) mod telemetry;
-
-pub(crate) fn local_acp_enabled() -> bool {
-    true
-}
+pub(crate) mod tool_calls;

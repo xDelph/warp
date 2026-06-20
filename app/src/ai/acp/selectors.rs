@@ -17,7 +17,7 @@ use warpui::{
 use super::harness_picker::{
     LocalAcpHarnessModel, LocalAcpHarnessModelEvent, LocalAcpModelDiscoveryStatus,
 };
-use super::{registry};
+use super::registry;
 use crate::ai::blocklist::agent_view::agent_input_footer::AgentInputButtonTheme;
 use crate::ai::harness_display;
 use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant};

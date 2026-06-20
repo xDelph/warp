@@ -31,7 +31,7 @@ use crate::ai::request_usage_model::{
     AIRequestUsageModel, AIRequestUsageModelEvent, AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD,
 };
 use crate::search::slash_command_menu::static_commands::commands;
-use crate::settings::AISettings;
+use crate::settings::{AISettings, AISettingsChangedEvent};
 use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
 use crate::terminal::input::message_bar::attached_context::{
     AttachedBlocksMessageProducer, AttachedContextArgs, AttachedTextSelectionMessageProducer,
@@ -227,6 +227,12 @@ impl AgentMessageBar {
             }
         });
 
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |_, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                ctx.notify();
+            }
+        });
+
         Self {
             agent_view_controller,
             ephemeral_message_model,
@@ -352,6 +358,8 @@ impl View for AgentMessageBar {
 
         // Show credits banner when user has ambient credits remaining.
         let right_element = if cfg!(target_family = "wasm") {
+            None
+        } else if crate::ai::local_acp::cloud_agent_disabled(app) {
             None
         } else if let Some(credits) =
             AIRequestUsageModel::as_ref(app).ambient_only_credits_remaining()
@@ -580,9 +588,10 @@ impl MessageProvider<AgentMessageArgs<'_>> for ZeroStateMessageProducer {
             is_in_cloud_context(agent_view_controller.agent_view_state(), terminal_model);
         let ai_settings = AISettings::as_ref(app);
 
-        // Handoff to cloud only available for local agents.
-        #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-        if !is_cloud_agent && ai_settings.is_ampersand_handoff_enabled(app) {
+        if !is_cloud_agent
+            && !crate::ai::local_acp::cloud_agent_disabled(app)
+            && ai_settings.is_ampersand_handoff_enabled(app)
+        {
             items.push(
                 MessageItem::clickable(
                     vec![

@@ -4,9 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use itertools::Itertools as _;
-use markdown_parser::parse_markdown;
-#[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
+use markdown_parser::{parse_markdown, FormattedText, FormattedTextFragment, FormattedTextLine};
 use parking_lot::FairMutex;
 use settings::Setting;
 use warp_core::features::FeatureFlag;
@@ -28,11 +26,9 @@ use warpui::{
 
 use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
-#[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-use crate::ai::blocklist::agent_view::ENTER_CLOUD_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE;
 use crate::ai::blocklist::agent_view::{
     agent_view_bg_color, AgentViewController, AgentViewEntryOrigin,
-    ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
+    ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE, ENTER_CLOUD_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
 };
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::conversation_navigation::ConversationNavigationData;
@@ -50,7 +46,6 @@ use crate::terminal::view::TerminalAction;
 use crate::terminal::{self, prompt, TerminalModel};
 use crate::util::time_format::format_approx_duration_from_now_utc;
 
-#[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
 const CLOUD_AGENT_DOCS_URL: &str = "https://docs.warp.dev/agent-platform/cloud-agents/overview";
 const OZ_UPDATES_SECTION_HEADER: &str = "What's new in Oz";
 
@@ -62,7 +57,6 @@ const MAX_RECENT_CONVERSATION_COUNT: usize = 3;
 #[derive(Default)]
 struct StateHandles {
     start_new_conversation: MouseStateHandle,
-    #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
     start_cloud_conversation: MouseStateHandle,
     switch_model: MouseStateHandle,
     exit: MouseStateHandle,
@@ -229,6 +223,11 @@ impl AgentViewZeroStateBlock {
             }
         });
         ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                ctx.notify();
+                return;
+            }
+
             let should_rerender_for_oz_updates_visibility = !me.origin.is_cloud_agent()
                 && matches!(
                     event,
@@ -405,9 +404,10 @@ impl View for AgentViewZeroStateBlock {
         let appearance = Appearance::as_ref(app);
         let theme = appearance.theme();
 
+        let use_local_acp = crate::ai::local_acp::local_acp_enabled(app);
+
         let header_props = if self.origin.is_cloud_agent() {
-            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-            {
+            if use_local_acp {
                 HeaderProps {
                     title: "New local ACP agent conversation".into(),
                     description: AgentViewDescription::PlainText(vec![
@@ -415,9 +415,7 @@ impl View for AgentViewZeroStateBlock {
                     ]),
                     icon: Icon::AgentMode,
                 }
-            }
-            #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-            {
+            } else {
                 HeaderProps {
                     title: "New Oz cloud agent conversation".into(),
                     description: AgentViewDescription::CloudModeWithDocsLink,
@@ -436,15 +434,17 @@ impl View for AgentViewZeroStateBlock {
             }
 
             HeaderProps {
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                title: "New local ACP agent conversation".into(),
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                title: "New Oz agent conversation".into(),
+                title: if use_local_acp {
+                    "New local ACP agent conversation".into()
+                } else {
+                    "New Oz agent conversation".into()
+                },
                 description: AgentViewDescription::PlainText(vec![local_description.into()]),
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                icon: Icon::AgentMode,
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                icon: Icon::Oz,
+                icon: if use_local_acp {
+                    Icon::AgentMode
+                } else {
+                    Icon::Oz
+                },
             }
         };
 
@@ -585,7 +585,6 @@ enum AgentViewDescription {
     /// Plain text descriptions (used for local agent mode).
     PlainText(Vec<Cow<'static, str>>),
     /// Cloud mode description with "Visit docs" hyperlink.
-    #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
     CloudModeWithDocsLink,
 }
 
@@ -665,7 +664,6 @@ fn render_title_and_description(props: HeaderProps, app: &AppContext) -> Vec<Box
                     .finish()
             }));
         }
-        #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
         AgentViewDescription::CloudModeWithDocsLink => {
             // First line: plain text.
             items.push(
@@ -770,22 +768,23 @@ fn render_body(props: ZeroStateBodyProps<'_>, app: &AppContext) -> Vec<Box<dyn E
             app,
         )];
 
-        #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-        body_items.push(render_standard_message(
-            Message::new(vec![MessageItem::clickable(
-                vec![
-                    MessageItem::keystroke(
-                        ENTER_CLOUD_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE.clone(),
-                    ),
-                    MessageItem::text("start a new cloud agent conversation"),
-                ],
-                |ctx| {
-                    ctx.dispatch_typed_action(TerminalAction::EnterCloudAgentView);
-                },
-                state_handles.start_cloud_conversation.clone(),
-            )]),
-            app,
-        ));
+        if !crate::ai::local_acp::cloud_agent_disabled(app) {
+            body_items.push(render_standard_message(
+                Message::new(vec![MessageItem::clickable(
+                    vec![
+                        MessageItem::keystroke(
+                            ENTER_CLOUD_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE.clone(),
+                        ),
+                        MessageItem::text("start a new cloud agent conversation"),
+                    ],
+                    |ctx| {
+                        ctx.dispatch_typed_action(TerminalAction::EnterCloudAgentView);
+                    },
+                    state_handles.start_cloud_conversation.clone(),
+                )]),
+                app,
+            ));
+        }
 
         body_items.push(render_standard_message(
             Message::new(vec![MessageItem::clickable(
@@ -1278,7 +1277,6 @@ mod styles {
     pub const CONTAINER_VERTICAL_PADDING: f32 = 16.;
     pub const TITLE_MARGIN_BOTTOM: f32 = 8.;
     pub const SECTION_HEADER_MARGIN_BOTTOM: f32 = 8.;
-    #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
     pub const DESCRIPTION_LINE_MARGIN_BOTTOM: f32 = 6.;
     pub const CREDITS_BANNER_FONT_SIZE: f32 = 12.;
 

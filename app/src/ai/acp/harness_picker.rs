@@ -125,7 +125,11 @@ impl LocalAcpHarnessModel {
         }
     }
 
-    pub(crate) fn ensure_models_discovered(&mut self, harness: Harness, ctx: &mut ModelContext<Self>) {
+    pub(crate) fn ensure_models_discovered(
+        &mut self,
+        harness: Harness,
+        ctx: &mut ModelContext<Self>,
+    ) {
         match self.model_discovery_status(harness) {
             LocalAcpModelDiscoveryStatus::Loading | LocalAcpModelDiscoveryStatus::Loaded => return,
             LocalAcpModelDiscoveryStatus::Failed(_) if harness != self.selected_harness => return,
@@ -187,10 +191,7 @@ impl LocalAcpHarnessModel {
     }
 }
 
-fn saved_model_id_for_harness(
-    settings: &CloudAgentSettings,
-    harness: Harness,
-) -> Option<String> {
+fn saved_model_id_for_harness(settings: &CloudAgentSettings, harness: Harness) -> Option<String> {
     settings
         .last_selected_harness_model
         .value()
