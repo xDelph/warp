@@ -62,12 +62,13 @@ use crate::ai::acp::{
     harness_picker::{LocalAcpHarnessModel, LocalAcpHarnessModelEvent},
     models as local_acp_models, openusage as local_acp_openusage,
 };
-#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
 use crate::ai::agent::conversation::AIConversation;
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
-use crate::ai::blocklist::usage::icon_for_context_window_usage;
+use crate::ai::blocklist::usage::{
+    format_context_window_remaining_label, is_high_context_window_usage,
+};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::harness_availability::HarnessAvailabilityModel;
 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
@@ -698,7 +699,6 @@ impl AgentInputFooter {
 
         let context_window_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
-                .with_icon(Icon::ContextRemaining100)
                 .with_tooltip("Context window usage")
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
@@ -2181,29 +2181,9 @@ impl AgentInputFooter {
         if let Some(conversation) =
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
         {
-            let (usage, tooltip) = {
-                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                if crate::ai::local_acp::local_acp_enabled(ctx) {
-                    self.local_acp_context_window_usage(&conversation, ctx)
-                        .unwrap_or_else(|| {
-                            let usage = conversation.context_window_usage();
-                            let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
-                            (usage, format!("{remaining_pct}% context remaining"))
-                        })
-                } else {
-                    let usage = conversation.context_window_usage();
-                    let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
-                    (usage, format!("{remaining_pct}% context remaining"))
-                }
-                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
-                {
-                    let usage = conversation.context_window_usage();
-                    let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
-                    (usage, format!("{remaining_pct}% context remaining"))
-                }
-            };
-            let icon = icon_for_context_window_usage(usage);
-            let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+            let (usage, tooltip) = self.context_window_usage_and_tooltip(&conversation, ctx);
+            let label = format_context_window_remaining_label(usage);
+            let high_usage = is_high_context_window_usage(usage);
 
             let expiry = conversation.latest_exchange().and_then(|exchange| {
                 let output = exchange.output_status.output()?;
@@ -2211,17 +2191,18 @@ impl AgentInputFooter {
             });
             let is_cache_expired = FeatureFlag::PromptCacheExpiryWarning.is_enabled()
                 && expiry.is_some_and(|expiry| expiry <= Local::now());
-            let context_remaining_tooltip = format!("{remaining_pct}% context remaining");
             let tooltip = if is_cache_expired {
-                format!("{context_remaining_tooltip} · prompt cache expired")
+                format!("{tooltip} · prompt cache expired")
             } else {
-                context_remaining_tooltip
+                tooltip
             };
 
             self.prompt_cache_expired = is_cache_expired;
             self.context_window_button.update(ctx, |button, ctx| {
-                button.set_icon(Some(icon), ctx);
+                button.set_icon(None, ctx);
+                button.set_label(label, ctx);
                 button.set_tooltip(Some(tooltip), ctx);
+                button.set_theme(ContextWindowUsageButtonTheme { high_usage }, ctx);
             });
 
             self.reschedule_prompt_cache_expiry_timer(expiry, ctx);
@@ -2256,6 +2237,23 @@ impl AgentInputFooter {
             },
         );
         self.prompt_cache_expiry_timer_handle = Some(handle);
+    }
+
+    fn context_window_usage_and_tooltip(
+        &self,
+        conversation: &AIConversation,
+        ctx: &ViewContext<Self>,
+    ) -> (f32, String) {
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::local_acp_enabled(ctx) {
+            if let Some(result) = self.local_acp_context_window_usage(conversation, ctx) {
+                return result;
+            }
+        }
+
+        let usage = conversation.context_window_usage();
+        let remaining_pct = ((1.0 - usage) * 100.0).round() as i32;
+        (usage, format!("{remaining_pct}% context remaining"))
     }
 
     #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
@@ -2943,6 +2941,41 @@ impl Entity for AgentInputFooter {
 }
 
 pub(crate) struct AgentInputButtonTheme;
+
+struct ContextWindowUsageButtonTheme {
+    high_usage: bool,
+}
+
+impl ActionButtonTheme for ContextWindowUsageButtonTheme {
+    fn background(&self, hovered: bool, appearance: &Appearance) -> Option<Fill> {
+        AgentInputButtonTheme.background(hovered, appearance)
+    }
+
+    fn text_color(
+        &self,
+        hovered: bool,
+        background: Option<Fill>,
+        appearance: &Appearance,
+    ) -> ColorU {
+        if self.high_usage {
+            appearance.theme().ansi_fg_red()
+        } else {
+            AgentInputButtonTheme.text_color(hovered, background, appearance)
+        }
+    }
+
+    fn border(&self, appearance: &Appearance) -> Option<ColorU> {
+        AgentInputButtonTheme.border(appearance)
+    }
+
+    fn should_opt_out_of_contrast_adjustment(&self) -> bool {
+        AgentInputButtonTheme.should_opt_out_of_contrast_adjustment()
+    }
+
+    fn font_properties(&self) -> Option<warpui::fonts::Properties> {
+        AgentInputButtonTheme.font_properties()
+    }
+}
 
 impl ActionButtonTheme for AgentInputButtonTheme {
     fn background(&self, hovered: bool, appearance: &Appearance) -> Option<Fill> {
