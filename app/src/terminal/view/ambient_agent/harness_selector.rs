@@ -25,6 +25,7 @@ use crate::ai::cloud_agent_settings::CloudAgentSettings;
 use crate::ai::harness_availability::HarnessAvailabilityModel;
 use crate::ai::harness_display::{brand_color, icon_for};
 use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
+use crate::settings::{AISettings, AISettingsChangedEvent};
 use crate::terminal::input::{MenuPositioning, MenuPositioningProvider};
 use crate::terminal::view::ambient_agent::AmbientAgentViewModel;
 use crate::view_components::action_button::{ActionButton, ActionButtonTheme, ButtonSize};
@@ -131,6 +132,13 @@ impl HarnessSelector {
                 me.refresh_button(ctx);
             },
         );
+
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                me.refresh_menu(ctx);
+                me.refresh_button(ctx);
+            }
+        });
 
         let mut me = Self {
             button,
@@ -245,6 +253,7 @@ impl HarnessSelector {
         let availability_model = HarnessAvailabilityModel::as_ref(ctx);
         let items = build_menu_items(
             availability_model,
+            ctx,
             hover_background,
             header_text_color,
             disabled_text_color,
@@ -276,6 +285,7 @@ impl HarnessSelector {
 /// Builds the menu items from harness availability data.
 fn build_menu_items(
     availability: &HarnessAvailabilityModel,
+    app: &AppContext,
     hover_background: Fill,
     header_text_color: pathfinder_color::ColorU,
     disabled_text_color: pathfinder_color::ColorU,
@@ -292,7 +302,7 @@ fn build_menu_items(
 
     let mut items = vec![header];
 
-    for entry in availability.available_harnesses() {
+    for entry in availability.harnesses_for_selector(app) {
         let harness = entry.harness;
         let is_disabled = !entry.enabled;
         let display_name = availability.display_name_for(harness).to_string();

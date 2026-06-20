@@ -147,7 +147,6 @@ impl HarnessAvailabilityModel {
         &self.harnesses
     }
 
-    #[allow(dead_code)]
     pub fn harnesses_for_selector(&self, ctx: &warpui::AppContext) -> Vec<HarnessAvailability> {
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
         if crate::ai::local_acp::local_acp_enabled(ctx) {
@@ -165,18 +164,18 @@ impl HarnessAvailabilityModel {
     }
 
     /// Whether the harness selector should be shown (>1 known harness, including disabled).
-    pub fn should_show_harness_selector(&self) -> bool {
-        FeatureFlag::AgentHarness.is_enabled() && self.harnesses.len() > 1
+    pub fn should_show_harness_selector(&self, ctx: &warpui::AppContext) -> bool {
+        FeatureFlag::AgentHarness.is_enabled() && self.harnesses_for_selector(ctx).len() > 1
     }
 
     /// Whether any harness is available at all (at least one enabled).
-    pub fn has_any_enabled_harness(&self) -> bool {
-        self.harnesses.iter().any(|h| h.enabled)
+    pub fn has_any_enabled_harness(&self, ctx: &warpui::AppContext) -> bool {
+        self.harnesses_for_selector(ctx).iter().any(|h| h.enabled)
     }
 
     /// Whether a harness is both known and enabled.
-    pub fn is_harness_enabled(&self, harness: Harness) -> bool {
-        self.harnesses
+    pub fn is_harness_enabled(&self, harness: Harness, ctx: &warpui::AppContext) -> bool {
+        self.harnesses_for_selector(ctx)
             .iter()
             .any(|h| h.harness == harness && h.enabled)
     }
@@ -189,7 +188,6 @@ impl HarnessAvailabilityModel {
             .filter(|m| !m.is_empty())
     }
 
-    #[allow(dead_code)]
     pub fn models_for_picker(
         &self,
         harness: Harness,
@@ -507,6 +505,11 @@ impl SingletonEntity for HarnessAvailabilityModel {}
 #[cfg(all(test, feature = "local_acp", not(target_family = "wasm")))]
 mod tests {
     use super::*;
+    use settings::Setting;
+    use warpui::{App, SingletonEntity};
+
+    use crate::settings::AISettings;
+    use crate::test_util::terminal::initialize_app_for_terminal_view;
 
     #[test]
     fn local_acp_catalog_contains_supported_agents() {
@@ -543,5 +546,62 @@ mod tests {
                 .unwrap()
                 .enabled
         );
+    }
+
+    #[test]
+    fn harnesses_for_selector_uses_local_catalog_when_local_acp_enabled() {
+        App::test((), |mut app| async move {
+            initialize_app_for_terminal_view(&mut app);
+
+            AISettings::handle(&app).update(&mut app, |settings, ctx| {
+                let _ = settings.is_any_ai_enabled.set_value(true, ctx);
+                let _ = settings.local_acp_enabled.set_value(true, ctx);
+            });
+
+            app.read(|ctx| {
+                let model = HarnessAvailabilityModel::as_ref(ctx);
+                let harnesses = model.harnesses_for_selector(ctx);
+                let ids: Vec<_> = harnesses.iter().map(|h| h.harness).collect();
+                assert!(ids.contains(&Harness::Cursor));
+                assert!(ids.contains(&Harness::Claude));
+            });
+        });
+    }
+
+    #[test]
+    fn harnesses_for_selector_uses_server_catalog_when_local_acp_disabled() {
+        App::test((), |mut app| async move {
+            initialize_app_for_terminal_view(&mut app);
+
+            AISettings::handle(&app).update(&mut app, |settings, ctx| {
+                let _ = settings.is_any_ai_enabled.set_value(true, ctx);
+                let _ = settings.local_acp_enabled.set_value(false, ctx);
+            });
+
+            app.read(|ctx| {
+                let model = HarnessAvailabilityModel::as_ref(ctx);
+                let harnesses = model.harnesses_for_selector(ctx);
+                assert_eq!(harnesses.len(), 1);
+                assert_eq!(harnesses[0].harness, Harness::Oz);
+            });
+        });
+    }
+
+    #[test]
+    fn models_for_picker_merges_local_defaults_when_local_acp_enabled() {
+        App::test((), |mut app| async move {
+            initialize_app_for_terminal_view(&mut app);
+
+            AISettings::handle(&app).update(&mut app, |settings, ctx| {
+                let _ = settings.is_any_ai_enabled.set_value(true, ctx);
+                let _ = settings.local_acp_enabled.set_value(true, ctx);
+            });
+
+            app.read(|ctx| {
+                let model = HarnessAvailabilityModel::as_ref(ctx);
+                let models = model.models_for_picker(Harness::Gemini, ctx);
+                assert!(models.iter().any(|m| m.id == "gemini-2.5-pro"));
+            });
+        });
     }
 }

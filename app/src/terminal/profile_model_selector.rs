@@ -898,14 +898,14 @@ impl ProfileModelSelector {
 
     // Checks that we have a harness in the `AmbientAgentViewModel` and returns model options from
     // the `HarnessAvailabilityModel` for that harness.
-    fn active_harness_model_info<'a>(&self, app: &'a AppContext) -> Option<&'a HarnessModelInfo> {
+    fn active_harness_model_info(&self, app: &AppContext) -> Option<HarnessModelInfo> {
         let ambient_model = self.ambient_agent_view_model.as_ref()?.as_ref(app);
         let harness = ambient_model.selected_harness();
         let model_id = ambient_model.selected_harness_model_id()?;
         let reasoning_level = ambient_model.selected_harness_reasoning_level();
         HarnessAvailabilityModel::as_ref(app)
-            .models_for(harness)?
-            .iter()
+            .models_for_picker(harness, app)
+            .into_iter()
             .find(|m| m.id == model_id && m.reasoning_level.as_deref() == reasoning_level)
     }
 
@@ -930,7 +930,7 @@ impl ProfileModelSelector {
             .selected_harness_reasoning_level()
             .map(str::to_owned);
 
-        let models = HarnessAvailabilityModel::as_ref(ctx).models_for(harness);
+        let models = HarnessAvailabilityModel::as_ref(ctx).models_for_picker(harness, ctx);
 
         let mut items: Vec<MenuItem<ProfileModelSelectorAction>> = Vec::new();
 
@@ -948,8 +948,8 @@ impl ProfileModelSelector {
         }
         items.push(MenuItem::Item(default_fields));
 
-        if let Some(models) = models {
-            for model in models {
+        if !models.is_empty() {
+            for model in &models {
                 let is_selected = selected_model_id.as_deref() == Some(&model.id)
                     && selected_reasoning.as_deref() == model.reasoning_level.as_deref();
                 let mut fields = MenuItemFields::new(model.display_name.clone())

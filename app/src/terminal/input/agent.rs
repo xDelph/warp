@@ -118,7 +118,7 @@ impl Input {
         }
 
         let show_harness_row = FeatureFlag::CloudMode.is_enabled()
-            && HarnessAvailabilityModel::as_ref(app).should_show_harness_selector()
+            && HarnessAvailabilityModel::as_ref(app).should_show_harness_selector(app)
             && self
                 .ambient_agent_view_model()
                 .is_some_and(|ambient_agent_model| {

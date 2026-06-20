@@ -231,9 +231,9 @@ impl AmbientAgentViewModel {
         let harness = Harness::default();
         let availability = HarnessAvailabilityModel::as_ref(ctx);
         // If the default harness is not available, find the first available one.
-        let harness = if !availability.is_harness_enabled(harness) {
+        let harness = if !availability.is_harness_enabled(harness, ctx) {
             availability
-                .available_harnesses()
+                .harnesses_for_selector(ctx)
                 .iter()
                 .find(|h| h.enabled)
                 .map(|h| h.harness)

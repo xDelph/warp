@@ -1807,7 +1807,7 @@ impl AgentManagementView {
         }
 
         let availability = HarnessAvailabilityModel::as_ref(app);
-        if availability.should_show_harness_selector()
+        if availability.should_show_harness_selector(app)
             && let Some(harness) = entry.display.harness
         {
             metadata_parts.push(format!(
@@ -1961,7 +1961,7 @@ impl AgentManagementView {
                 .with_child(ChildView::new(&self.created_on_dropdown).finish())
                 .with_child(ChildView::new(&self.artifact_dropdown).finish());
 
-            if HarnessAvailabilityModel::as_ref(app).should_show_harness_selector() {
+            if HarnessAvailabilityModel::as_ref(app).should_show_harness_selector(app) {
                 filters_wrap.add_child(ChildView::new(&self.harness_dropdown).finish());
             }
 

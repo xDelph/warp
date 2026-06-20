@@ -17,3 +17,7 @@ pub(crate) fn local_acp_enabled(ctx: &AppContext) -> bool {
 pub(crate) fn cloud_agent_disabled(ctx: &AppContext) -> bool {
     local_acp_enabled(ctx)
 }
+
+#[cfg(all(test, feature = "local_acp", not(target_family = "wasm")))]
+#[path = "local_acp_tests.rs"]
+mod tests;
