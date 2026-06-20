@@ -1385,7 +1385,7 @@ define_settings_group!(AISettings, settings: [
     // server-side Oz. Requires a build compiled with the `local_acp` feature.
     local_acp_enabled: LocalAcpEnabled {
         type: bool,
-        default: false,
+        default: warp_core::channel::ChannelState::channel().is_dogfood(),
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,

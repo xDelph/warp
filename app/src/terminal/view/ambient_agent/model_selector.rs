@@ -387,16 +387,13 @@ impl ModelSelector {
                 .resolved_harness_selection(harness, ctx)
                 .and_then(|selection| {
                     HarnessAvailabilityModel::as_ref(ctx)
-                        .models_for(harness)
-                        .and_then(|models| {
-                            models
-                                .iter()
-                                .find(|m| {
-                                    m.id == selection.model_id
-                                        && m.reasoning_level == selection.reasoning_level
-                                })
-                                .map(|info| info.display_name.clone())
+                        .models_for_picker(harness, ctx)
+                        .into_iter()
+                        .find(|m| {
+                            m.id == selection.model_id
+                                && m.reasoning_level == selection.reasoning_level
                         })
+                        .map(|info| info.display_name.clone())
                 })
                 .unwrap_or_else(|| "default".to_string()),
             _ => LLMPreferences::as_ref(ctx)
@@ -550,11 +547,10 @@ impl ModelSelector {
             ));
         }
 
-        let models = HarnessAvailabilityModel::as_ref(ctx).models_for(harness);
+        let models = HarnessAvailabilityModel::as_ref(ctx).models_for_picker(harness, ctx);
         items.extend(
             models
-                .into_iter()
-                .flat_map(|slice| slice.iter())
+                .iter()
                 .filter_map(|model| {
                     let display_name = model.display_name.clone();
                     if !query.is_empty() && !display_name.to_lowercase().contains(query) {

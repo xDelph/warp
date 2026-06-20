@@ -13082,7 +13082,7 @@ impl Input {
             {
                 if FeatureFlag::AgentHarness.is_enabled() {
                     let availability = HarnessAvailabilityModel::as_ref(ctx);
-                    if !availability.has_any_enabled_harness() {
+                    if !availability.has_any_enabled_harness(ctx) {
                         let window_id = ctx.window_id();
                         ToastStack::handle(ctx).update(ctx, |ts, ctx| {
                             ts.add_ephemeral_toast(

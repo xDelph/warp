@@ -101,6 +101,9 @@ impl TerminalViewZeroStateBlock {
                 me.should_hide = true;
                 ctx.notify();
             }
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                ctx.notify();
+            }
         });
 
         ctx.subscribe_to_model(&TerminalSettings::handle(ctx), |me, _, event, ctx| {
