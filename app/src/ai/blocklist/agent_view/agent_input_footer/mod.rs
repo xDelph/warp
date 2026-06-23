@@ -2608,6 +2608,17 @@ impl View for AgentInputFooter {
 
         let has_prompt_alert = !self.prompt_alert.as_ref(app).is_no_alert();
         if has_prompt_alert {
+            if should_render_right_model_selector_with_prompt_alert(&left_items, &right_items) {
+                if let Some(element) = self.render_toolbar_item(
+                    &AgentToolbarItemKind::ModelSelector,
+                    shared_status,
+                    is_cloud_context,
+                    is_conversation_transcript_context,
+                    app,
+                ) {
+                    right_buttons.add_child(element);
+                }
+            }
             right_buttons.add_child(
                 Shrinkable::new(
                     1.,
@@ -2651,6 +2662,100 @@ impl View for AgentInputFooter {
 
         container.finish()
     }
+}
+
+fn should_render_right_model_selector_with_prompt_alert(
+    left_items: &[AgentToolbarItemKind],
+    right_items: &[AgentToolbarItemKind],
+) -> bool {
+    right_items.contains(&AgentToolbarItemKind::ModelSelector)
+        && !left_items.contains(&AgentToolbarItemKind::ModelSelector)
+}
+
+/// Render a message bubble calling out that the model has switched now that we're in FTU mode.
+/// This callout is dismissable and does not re-appear once you've dismissed it once.
+fn render_ftu_callout(
+    close_button: &ViewHandle<ActionButton>,
+    app: &AppContext,
+) -> Box<dyn Element> {
+    let appearance = Appearance::as_ref(app);
+    let theme = appearance.theme();
+    let background = theme.background().blend(&theme.accent().with_opacity(50));
+    let text_color = internal_colors::text_main(theme, background.into_solid());
+
+    let callout_box = ConstrainedBox::new(
+        Container::new(
+            Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                .with_spacing(8.)
+                .with_child(
+                    Expanded::new(
+                        1.,
+                        Text::new(
+                            "Now using Full Terminal Agent's default model.",
+                            appearance.ui_font_family(),
+                            appearance.monospace_font_size() - 2.,
+                        )
+                        .with_color(text_color)
+                        .with_line_height_ratio(DEFAULT_UI_LINE_HEIGHT_RATIO)
+                        .with_selectable(false)
+                        .finish(),
+                    )
+                    .finish(),
+                )
+                .with_child(
+                    Container::new(ChildView::new(close_button).finish())
+                        .with_margin_top(-3.)
+                        .finish(),
+                )
+                .finish(),
+        )
+        .with_vertical_padding(12.)
+        .with_horizontal_padding(16.)
+        .with_background(background)
+        .with_border(Border::all(1.).with_border_fill(theme.accent()))
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
+        .finish(),
+    )
+    .with_width(348.)
+    .finish();
+
+    // The way that we render the little triangle in the bottom of the message bubble
+    // is by rendering two triangle icons (a filled triangle and an outlined triangle) and then
+    // stacking them on top of each other below the message bubble. I don't think there's a simpler
+    // way to do this with our UI framework.
+    let triangle_stack = Stack::new()
+        .with_child(
+            ConstrainedBox::new(
+                Icon::CalloutTriangleBorderDown
+                    .to_warpui_icon(Fill::Solid(theme.accent().into_solid()))
+                    .finish(),
+            )
+            .with_width(24.)
+            .with_height(24.)
+            .finish(),
+        )
+        .with_child(
+            ConstrainedBox::new(
+                Icon::CalloutTriangleFillDown
+                    .to_warpui_icon(background)
+                    .finish(),
+            )
+            .with_width(24.)
+            .with_height(24.)
+            .finish(),
+        );
+
+    Flex::column()
+        .with_main_axis_size(MainAxisSize::Min)
+        .with_child(callout_box)
+        .with_child(
+            Container::new(triangle_stack.finish())
+                .with_margin_left(300.)
+                .with_margin_top(-3.)
+                .finish(),
+        )
+        .finish()
 }
 
 #[derive(Debug, Clone)]
