@@ -2430,6 +2430,17 @@ impl View for AgentInputFooter {
 
         let has_prompt_alert = !self.prompt_alert.as_ref(app).is_no_alert();
         if has_prompt_alert {
+            if should_render_right_model_selector_with_prompt_alert(&left_items, &right_items) {
+                if let Some(element) = self.render_toolbar_item(
+                    &AgentToolbarItemKind::ModelSelector,
+                    shared_status,
+                    is_cloud_context,
+                    is_conversation_transcript_context,
+                    app,
+                ) {
+                    right_buttons.add_child(element);
+                }
+            }
             right_buttons.add_child(
                 Shrinkable::new(
                     1.,
@@ -2497,6 +2508,14 @@ impl View for AgentInputFooter {
             container.finish()
         }
     }
+}
+
+fn should_render_right_model_selector_with_prompt_alert(
+    left_items: &[AgentToolbarItemKind],
+    right_items: &[AgentToolbarItemKind],
+) -> bool {
+    right_items.contains(&AgentToolbarItemKind::ModelSelector)
+        && !left_items.contains(&AgentToolbarItemKind::ModelSelector)
 }
 
 /// Render a message bubble calling out that the model has switched now that we're in FTU mode.
