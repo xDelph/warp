@@ -80,6 +80,12 @@ pub(crate) fn command_for_harness(harness: Harness) -> Option<(PathBuf, Vec<Stri
 
 pub(crate) fn should_auto_authenticate(harness: Harness) -> bool {
     match harness {
+        // Codex ACP reads ChatGPT login state / CODEX_API_KEY / OPENAI_API_KEY itself.
+        // Calling authenticate() can trigger unsupported interactive flows.
+        Harness::Codex => false,
+        // Gemini ACP must be driven by GEMINI_API_KEY. Browser login is no longer
+        // supported for this path, so never call authenticate().
+        Harness::Gemini => false,
         // Devin's ACP server advertises browser auth methods even when `devin acp`
         // is already usable from an authenticated CLI. Calling authenticate() here
         // opens a browser window from Warp and breaks the normal local CLI path.
@@ -100,5 +106,46 @@ pub(crate) fn process_env_for_harness(harness: Harness) -> &'static [(&'static s
     match harness {
         Harness::Cursor => &[("CURSOR_ACP_DEFAULT_MODE", "yolo")],
         _ => &[],
+    }
+}
+
+pub(crate) fn removed_process_env_for_harness(harness: Harness) -> &'static [&'static str] {
+    match harness {
+        Harness::Codex => &["ANTHROPIC_API_KEY"],
+        Harness::Gemini => &[
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "GOOGLE_GENAI_USE_VERTEXAI",
+        ],
+        _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_and_gemini_do_not_use_acp_browser_authenticate() {
+        assert!(!should_auto_authenticate(Harness::Codex));
+        assert!(!should_auto_authenticate(Harness::Gemini));
+    }
+
+    #[test]
+    fn codex_removes_anthropic_key_from_child_env() {
+        assert_eq!(
+            removed_process_env_for_harness(Harness::Codex),
+            &["ANTHROPIC_API_KEY"]
+        );
+    }
+
+    #[test]
+    fn gemini_allows_only_gemini_api_key_auth_env() {
+        let removed = removed_process_env_for_harness(Harness::Gemini);
+        assert!(removed.contains(&"ANTHROPIC_API_KEY"));
+        assert!(removed.contains(&"GOOGLE_API_KEY"));
+        assert!(removed.contains(&"GOOGLE_APPLICATION_CREDENTIALS"));
+        assert!(removed.contains(&"GOOGLE_GENAI_USE_VERTEXAI"));
     }
 }

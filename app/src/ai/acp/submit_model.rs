@@ -32,6 +32,7 @@ pub(crate) struct LocalAcpSubmitRequest {
     pub(crate) prompt: String,
     pub(crate) harness: Harness,
     pub(crate) model_id: Option<String>,
+    pub(crate) gemini_api_key: Option<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) conversation_id: AIConversationId,
     pub(crate) stream_id: ResponseStreamId,
@@ -149,7 +150,7 @@ impl LocalAcpSubmitModel {
         request: LocalAcpSubmitRequest,
         stream_tx: async_channel::Sender<LocalAcpStreamEvent>,
     ) -> oneshot::Receiver<Result<LocalAcpSubmitResult>> {
-        let key = LocalAcpWorkerKey::from_request(&request);
+        let key = LocalAcpWorkerKey::from_submit_request(&request);
         let (result_tx, result_rx) = oneshot::channel();
         let worker_request = LocalAcpWorkerRequest {
             request,
@@ -190,7 +191,7 @@ struct LocalAcpWorkerKey {
 }
 
 impl LocalAcpWorkerKey {
-    fn from_request(request: &LocalAcpSubmitRequest) -> Self {
+    fn from_submit_request(request: &LocalAcpSubmitRequest) -> Self {
         Self {
             harness: request.harness,
             cwd: request.cwd.clone(),
@@ -261,7 +262,15 @@ async fn submit_local_acp_query_on_worker(
     stream_tx: async_channel::Sender<LocalAcpStreamEvent>,
 ) -> Result<LocalAcpSubmitResult> {
     if session.is_none() {
-        *session = Some(start_local_acp_session(&request).await?);
+        *session = Some(
+            start_local_acp_session(
+                request.harness,
+                &request.cwd,
+                request.model_id.as_deref(),
+                request.gemini_api_key.as_deref(),
+            )
+            .await?,
+        );
     }
 
     let session = session
@@ -272,37 +281,31 @@ async fn submit_local_acp_query_on_worker(
     prompt_local_acp_session(session, request, stream_tx).await
 }
 
-async fn start_local_acp_session(request: &LocalAcpSubmitRequest) -> Result<LocalAcpWorkerSession> {
-    let spec = registry::spec_for_harness(request.harness)
-        .ok_or_else(|| anyhow!("{} does not support local ACP", request.harness))?;
-    let program = path_search::resolve_command(spec.command).with_context(|| {
-        format!(
-            "{} ACP command '{}' was not found",
-            request.harness, spec.command
-        )
-    })?;
+async fn start_local_acp_session(
+    harness: Harness,
+    cwd: &PathBuf,
+    model_id: Option<&str>,
+    gemini_api_key: Option<&str>,
+) -> Result<LocalAcpWorkerSession> {
+    let spec = registry::spec_for_harness(harness)
+        .ok_or_else(|| anyhow!("{} does not support local ACP", harness))?;
+    let program = path_search::resolve_harness_command(harness, spec.command)
+        .with_context(|| format!("{} ACP command '{}' was not found", harness, spec.command))?;
 
     let mut command = Command::new(program);
     command.args(spec.args);
-    command.current_dir(&request.cwd);
-    command.env("PATH", path_search::augmented_path_env());
-    for (key, value) in registry::process_env_for_harness(request.harness) {
-        command.env(key, value);
-    }
+    command.current_dir(cwd);
+    configure_process_env(&mut command, harness, gemini_api_key);
 
     let runtime = RuntimeContext::new(|task| {
         tokio::task::spawn_local(task);
     });
     let connection = Connection::spawn(&mut command, &runtime)?;
     let initialize_result = connection
-        .initialize(
-            acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
-                acp::Implementation::new("warp", env!("CARGO_PKG_VERSION")).title("Warp"),
-            ),
-        )
+        .initialize(super::connection::initialize_request())
         .await?;
 
-    if registry::should_auto_authenticate(request.harness) {
+    if registry::should_auto_authenticate(harness) {
         if let Some(auth_method) = initialize_result.auth_methods.first() {
             connection
                 .authenticate(acp::AuthenticateRequest::new(auth_method.id().clone()))
@@ -310,7 +313,9 @@ async fn start_local_acp_session(request: &LocalAcpSubmitRequest) -> Result<Loca
         }
     }
 
-    let session = connection.new_session(new_session_request(request)).await?;
+    let session = connection
+        .new_session(new_session_request(harness, cwd))
+        .await?;
     let session_id = session.session_id.clone();
     let config_options = session.config_options.clone();
 
@@ -321,14 +326,26 @@ async fn start_local_acp_session(request: &LocalAcpSubmitRequest) -> Result<Loca
         applied_model_id: None,
         applied_mode: None,
     };
-    apply_session_preferences(
-        request.harness,
-        request.model_id.as_deref(),
-        &mut worker_session,
-    )
-    .await?;
+    apply_session_preferences(harness, model_id, &mut worker_session).await?;
 
     Ok(worker_session)
+}
+
+fn configure_process_env(command: &mut Command, harness: Harness, gemini_api_key: Option<&str>) {
+    command.env("PATH", path_search::augmented_path_env());
+    for key in registry::removed_process_env_for_harness(harness) {
+        command.env_remove(key);
+    }
+    for (key, value) in registry::process_env_for_harness(harness) {
+        command.env(key, value);
+    }
+    if harness == Harness::Gemini {
+        if let Some(api_key) = gemini_api_key.filter(|key| !key.trim().is_empty()) {
+            command.env("GEMINI_API_KEY", api_key);
+        } else {
+            command.env_remove("GEMINI_API_KEY");
+        }
+    }
 }
 
 async fn apply_session_preferences(
@@ -430,10 +447,10 @@ async fn apply_gemini_session_model(
     Ok(())
 }
 
-fn new_session_request(request: &LocalAcpSubmitRequest) -> acp::NewSessionRequest {
-    let mut new_session = acp::NewSessionRequest::new(request.cwd.clone());
-    if request.harness == Harness::Cursor {
-        if let Some(mode_id) = registry::default_session_mode(request.harness) {
+fn new_session_request(harness: Harness, cwd: &PathBuf) -> acp::NewSessionRequest {
+    let mut new_session = acp::NewSessionRequest::new(cwd.clone());
+    if harness == Harness::Cursor {
+        if let Some(mode_id) = registry::default_session_mode(harness) {
             let mut meta = Map::new();
             meta.insert(
                 "default_mode".to_string(),
