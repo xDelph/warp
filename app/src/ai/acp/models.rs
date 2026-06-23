@@ -29,6 +29,10 @@ pub(crate) fn default_models_for_harness(harness: Harness) -> Vec<LocalAcpModelI
 pub(crate) async fn discover_models_for_harness(
     harness: Harness,
 ) -> Result<Vec<LocalAcpModelInfo>> {
+    if harness == Harness::Gemini {
+        return Ok(default_models_for_harness(harness));
+    }
+
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -44,7 +48,7 @@ pub(crate) async fn discover_models_for_harness(
 async fn discover_models_on_local_runtime(harness: Harness) -> Result<Vec<LocalAcpModelInfo>> {
     let spec = registry::spec_for_harness(harness)
         .ok_or_else(|| anyhow!("{harness} is not an ACP agent"))?;
-    let program = path_search::resolve_command(spec.command)
+    let program = path_search::resolve_harness_command(harness, spec.command)
         .with_context(|| format!("{harness} ACP command '{}' was not found", spec.command))?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
 
@@ -52,6 +56,9 @@ async fn discover_models_on_local_runtime(harness: Harness) -> Result<Vec<LocalA
     command.args(spec.args);
     command.current_dir(&cwd);
     command.env("PATH", path_search::augmented_path_env());
+    for key in registry::removed_process_env_for_harness(harness) {
+        command.env_remove(key);
+    }
     for (key, value) in registry::process_env_for_harness(harness) {
         command.env(key, value);
     }
@@ -61,11 +68,7 @@ async fn discover_models_on_local_runtime(harness: Harness) -> Result<Vec<LocalA
     });
     let connection = Connection::spawn(&mut command, &runtime)?;
     let initialize_result = connection
-        .initialize(
-            acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
-                acp::Implementation::new("warp", env!("CARGO_PKG_VERSION")).title("Warp"),
-            ),
-        )
+        .initialize(super::connection::initialize_request())
         .await?;
 
     if registry::should_auto_authenticate(harness) {
@@ -146,6 +149,12 @@ fn context_window_tokens_for_model(harness: Harness, _model_id: Option<&str>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn discover_gemini_models_uses_static_defaults() {
+        let models = discover_models_for_harness(Harness::Gemini).await.unwrap();
+        assert_eq!(models, default_models_for_harness(Harness::Gemini));
+    }
 
     #[tokio::test]
     async fn discover_cursor_models() {
