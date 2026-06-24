@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub(crate) mod diff_window;
 pub(crate) mod connection;
 pub(crate) mod harness_picker;
 pub(crate) mod models;

@@ -7697,6 +7697,59 @@ impl TerminalView {
         }
     }
 
+    /// Starts a local ACP query when the user setting is enabled.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    pub(crate) fn execute_local_acp_query(
+        &mut self,
+        prompt: String,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        if !crate::ai::local_acp::local_acp_enabled(ctx) || prompt.is_empty() {
+            return false;
+        }
+
+        let Some((conversation_id, stream_id)) =
+            self.ai_controller.update(ctx, |controller, ctx| {
+                controller.start_local_acp_request(prompt.clone(), ctx)
+            })
+        else {
+            return false;
+        };
+
+        let cwd = self
+            .active_session_path_if_local(ctx)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let (harness, model_id) =
+            crate::ai::acp::harness_picker::LocalAcpHarnessModel::handle(ctx).update(
+                ctx,
+                |model, _ctx| {
+                    (
+                        model.selected_harness(),
+                        model.selected_model_id().map(ToOwned::to_owned),
+                    )
+                },
+            );
+
+        if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(
+            prompt,
+            harness,
+            model_id,
+            cwd,
+            conversation_id,
+            stream_id,
+            self.view_id,
+            ctx,
+        ) {
+            self.show_error_toast(
+                format!("Couldn't start local ACP agent: {error:#}"),
+                ctx,
+            );
+            return false;
+        }
+
+        true
+    }
+
     pub fn input(&self) -> &ViewHandle<Input> {
         &self.input
     }

@@ -5,7 +5,7 @@ use crate::settings::AISettings;
 use crate::test_util::terminal::initialize_app_for_terminal_view;
 
 #[test]
-fn local_acp_disabled_when_ai_globally_disabled() {
+fn local_acp_works_when_warp_ai_globally_disabled() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         AISettings::handle(&app).update(&mut app, |settings, ctx| {
@@ -14,8 +14,8 @@ fn local_acp_disabled_when_ai_globally_disabled() {
         });
 
         app.read(|ctx| {
-            assert!(!crate::ai::local_acp::local_acp_enabled(ctx));
-            assert!(!crate::ai::local_acp::cloud_agent_disabled(ctx));
+            assert!(crate::ai::local_acp::local_acp_enabled(ctx));
+            assert!(crate::ai::local_acp::cloud_agent_disabled(ctx));
         });
     });
 }

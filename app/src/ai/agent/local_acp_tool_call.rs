@@ -27,12 +27,20 @@ pub enum LocalAcpToolKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalAcpDiff {
+    pub path: String,
+    pub old_text: Option<String>,
+    pub new_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalAcpToolCallMessage {
     pub tool_call_id: String,
     pub title: String,
     pub kind: LocalAcpToolKind,
     pub status: LocalAcpToolCallStatus,
     pub body: AIAgentText,
+    pub diffs: Vec<LocalAcpDiff>,
     pub locations: Vec<String>,
 }
 
@@ -49,7 +57,7 @@ impl LocalAcpToolCallMessage {
     }
 
     pub fn has_visible_body(&self) -> bool {
-        !self.body_plain_text().trim().is_empty()
+        self.body.sections.iter().any(|section| !section.is_empty()) || !self.diffs.is_empty()
     }
 
     pub fn header_text(&self, finished_duration: Option<Duration>) -> String {

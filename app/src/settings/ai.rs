@@ -1385,7 +1385,7 @@ define_settings_group!(AISettings, settings: [
     // server-side Oz. Requires a build compiled with the `local_acp` feature.
     local_acp_enabled: LocalAcpEnabled {
         type: bool,
-        default: warp_core::channel::ChannelState::channel().is_dogfood(),
+        default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
@@ -1681,11 +1681,9 @@ impl AISettings {
     }
 
     pub fn is_local_acp_enabled(&self, app: &warpui::AppContext) -> bool {
-        if !self.is_any_ai_enabled(app) {
-            return false;
-        }
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
         {
+            let _ = app;
             *self.local_acp_enabled
         }
         #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]

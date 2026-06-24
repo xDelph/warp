@@ -1077,6 +1077,8 @@ impl View for AIBlock {
                 requested_commands: &self.requested_commands,
                 requested_mcp_tools: &self.requested_mcp_tools,
                 requested_edits: &self.requested_edits,
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                local_acp_edits: &self.local_acp_edits,
                 unit_test_suggestions: &self.unit_tests_suggestions,
                 todo_list_states: &self.todo_list_states,
                 collapsible_block_states: &self.collapsible_block_states,
