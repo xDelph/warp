@@ -300,15 +300,47 @@ impl TerminalView {
                     }
                 });
 
-                self.ai_controller.update(ctx, |controller, ctx| {
-                    controller.send_user_query_in_conversation(
-                        initial_prompt,
-                        conversation_id,
-                        None,
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                if self.execute_local_acp_query(initial_prompt.clone(), ctx) {
+                    did_auto_trigger_request = true;
+                } else if crate::ai::local_acp::cloud_agent_disabled(ctx) {
+                    self.show_error_toast(
+                        "Couldn't start local ACP agent.".to_string(),
                         ctx,
                     );
-                });
-                did_auto_trigger_request = true;
+                } else {
+                    self.ai_controller.update(ctx, |controller, ctx| {
+                        controller.send_user_query_in_conversation(
+                            initial_prompt,
+                            conversation_id,
+                            None,
+                            ctx,
+                        );
+                    });
+                    did_auto_trigger_request = true;
+                }
+
+                #[cfg(not(all(feature = "local_acp", not(target_family = "wasm"))))]
+                {
+                    self.ai_controller.update(ctx, |controller, ctx| {
+                        controller.send_user_query_in_conversation(
+                            initial_prompt,
+                            conversation_id,
+                            None,
+                            ctx,
+                        );
+                    });
+                    did_auto_trigger_request = true;
+                }
+
+                if did_auto_trigger_request {
+                    self.input.update(ctx, |input, ctx| {
+                        input.ai_input_model().update(ctx, |model, ctx| {
+                            model.handle_input_buffer_submitted(ctx);
+                        });
+                        input.clear_buffer_and_reset_undo_stack(ctx);
+                    });
+                }
             } else {
                 let appearance = Appearance::handle(ctx).as_ref(ctx);
                 let message = Message::new(vec![

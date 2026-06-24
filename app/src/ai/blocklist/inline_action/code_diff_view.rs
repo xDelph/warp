@@ -646,6 +646,25 @@ impl CodeDiffView {
         view
     }
 
+    /// Read-only diff viewer for Local ACP edit tool calls (no accept/reject actions).
+    pub fn new_view_only(
+        action_id: &AIAgentActionId,
+        title: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) -> Self {
+        Self::build(
+            action_id,
+            false,
+            CodeDiffState::ViewOnly { is_complete: true },
+            title,
+            AIIdentifiers::default(),
+            RequestFileEditsFormatKind::Unknown,
+            false,
+            None,
+            ctx,
+        )
+    }
+
     /// Creates a passive `CodeDiffView` for out-of-band code diff suggestions.
     ///
     /// Unlike [`Self::new`], this does not require an `AIBlockModel` or
@@ -1133,6 +1152,7 @@ impl CodeDiffView {
         self.state.is_waiting_for_user()
             || self.should_expand_when_complete
             || self.display_mode().is_full_pane()
+            || matches!(self.state, CodeDiffState::ViewOnly { .. })
     }
 
     fn is_inline_banner_expanded(&self) -> bool {
@@ -2437,17 +2457,20 @@ impl View for CodeDiffView {
         let appearance = Appearance::as_ref(app);
         let is_expanded = self.is_expanded();
 
-        let header = self.render_header(is_expanded, appearance, app);
-        let mut flex = Flex::column().with_child(header);
+        let mut flex = Flex::column();
+        if !matches!(self.state, CodeDiffState::ViewOnly { .. }) {
+            flex.add_child(self.render_header(is_expanded, appearance, app));
+        }
 
         if self.pending_diffs.is_empty() {
             return flex.finish();
         }
 
         if is_expanded {
-            let file_selection = self.render_file_selection(appearance, app);
-            let editor = self.render_editor(appearance, app);
-            flex.add_children([file_selection, editor]);
+            if !matches!(self.state, CodeDiffState::ViewOnly { .. }) || self.pending_diffs.len() > 1 {
+                flex.add_child(self.render_file_selection(appearance, app));
+            }
+            flex.add_child(self.render_editor(appearance, app));
 
             if self.display_mode().is_inline_banner()
                 && !self.is_inline_banner_expanded()

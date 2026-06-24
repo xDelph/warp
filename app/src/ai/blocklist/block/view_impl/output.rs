@@ -158,6 +158,8 @@ pub(crate) struct Props<'a> {
     pub(super) requested_commands: &'a HashMap<AIAgentActionId, RequestedCommand>,
     pub(super) requested_mcp_tools: &'a HashMap<AIAgentActionId, RequestedCommand>,
     pub(super) requested_edits: &'a IndexMap<AIAgentActionId, RequestedEdit>,
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    pub(super) local_acp_edits: &'a HashMap<MessageId, RequestedEdit>,
     pub(super) unit_test_suggestions:
         &'a HashMap<AIAgentActionId, ViewHandle<SuggestedUnitTestsView>>,
     pub(super) todo_list_states: &'a HashMap<MessageId, TodoListElementState>,
@@ -4102,6 +4104,24 @@ fn render_local_acp_tool_call(
 
     fn copy_code_action(snippet: String) -> AIBlockAction {
         AIBlockAction::CopyAIBlockCodeSnippet(snippet)
+    }
+
+    use crate::ai::agent::local_acp_tool_call::LocalAcpToolKind;
+
+    if tool_call.kind == LocalAcpToolKind::Edit && is_expanded {
+        if let Some(requested_edit) = props.local_acp_edits.get(&output_message.id) {
+            let border_color = theme.surface_2();
+            column.add_child(
+                Container::new(ChildView::new(&requested_edit.view).finish())
+                    .with_padding_left(body_indent)
+                    .with_padding_right(CONTENT_HORIZONTAL_PADDING)
+                    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.)))
+                    .with_background_color(theme.background().into_solid())
+                    .with_border(Border::all(1.).with_border_fill(border_color))
+                    .finish(),
+            );
+            return Some(column.finish().with_agent_output_item_spacing(app).finish());
+        }
     }
 
     let rendered_sections = render_text_sections(

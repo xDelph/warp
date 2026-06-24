@@ -14814,6 +14814,11 @@ impl Input {
             model.handle_input_buffer_submitted(ctx);
         });
 
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::cloud_agent_disabled(ctx) {
+            return;
+        }
+
         if let Some(conversation_id) = self
             .ai_context_model
             .as_ref(ctx)
