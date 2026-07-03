@@ -154,6 +154,10 @@ impl PromptAlertView {
     }
 
     pub fn determine_state<S: TeamScope + ?Sized>(scope: &S, app: &AppContext) -> PromptAlertState {
+        // Bypass all credit/billing checks with environment variable
+        if std::env::var("WARP_SKIP_CREDIT_CHECK").is_ok() {
+            return PromptAlertState::NoAlert;
+        }
         // First, if the user is offline, no AI features will work.
         if !NetworkStatus::as_ref(app).is_online() {
             return PromptAlertState::NoConnection;
