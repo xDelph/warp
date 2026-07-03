@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use acpx::RuntimeContext;
 use agent_client_protocol as acp;
@@ -26,6 +27,12 @@ pub(crate) fn default_models_for_harness(harness: Harness) -> Vec<LocalAcpModelI
         .collect()
 }
 
+/// codex-acp (and other local agents) can stall during `initialize`/`session/new` —
+/// e.g. while indexing a large workspace or waiting on a slow auth check — and there's
+/// no way for us to distinguish that from a genuine hang. Without a bound, a stalled
+/// handshake leaves the model picker stuck on "Loading" forever with no error surfaced.
+const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(20);
+
 pub(crate) async fn discover_models_for_harness(
     harness: Harness,
 ) -> Result<Vec<LocalAcpModelInfo>> {
@@ -33,16 +40,34 @@ pub(crate) async fn discover_models_for_harness(
         return Ok(default_models_for_harness(harness));
     }
 
-    tokio::task::spawn_blocking(move || {
+    log::debug!("discovering ACP models for {harness}");
+    let result = tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .context("failed to build local ACP model discovery runtime")?;
         let local_set = tokio::task::LocalSet::new();
-        runtime.block_on(local_set.run_until(discover_models_on_local_runtime(harness)))
+        runtime.block_on(local_set.run_until(async {
+            tokio::time::timeout(
+                MODEL_DISCOVERY_TIMEOUT,
+                discover_models_on_local_runtime(harness),
+            )
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "{harness} ACP model discovery timed out after {MODEL_DISCOVERY_TIMEOUT:?}"
+                )
+            })?
+        }))
     })
     .await
-    .context("local ACP model discovery runtime task panicked")?
+    .context("local ACP model discovery runtime task panicked")?;
+
+    match &result {
+        Ok(models) => log::debug!("discovered {} ACP models for {harness}", models.len()),
+        Err(error) => log::debug!("failed to discover ACP models for {harness}: {error:#}"),
+    }
+    result
 }
 
 async fn discover_models_on_local_runtime(harness: Harness) -> Result<Vec<LocalAcpModelInfo>> {
@@ -109,9 +134,14 @@ pub(crate) fn model_config_option(
     config_options: Option<&[acp::SessionConfigOption]>,
 ) -> Option<&acp::SessionConfigOption> {
     config_options?.iter().find(|option| {
+        // Try category first (new ACP spec)
         option.category == Some(acp::SessionConfigOptionCategory::Model)
-            || option.id.to_string().to_ascii_lowercase().contains("model")
-            || option.name.to_ascii_lowercase().contains("model")
+        // Fallback: check id/name for "model" (case-insensitive)
+        || option.id.to_string().to_ascii_lowercase().contains("model")
+        || option.name.to_ascii_lowercase().contains("model")
+        // Fallback for agents that use category-less config options
+        || option.id.to_string().to_ascii_lowercase() == "models"
+        || option.name.to_ascii_lowercase() == "model"
     })
 }
 
@@ -154,6 +184,28 @@ mod tests {
     async fn discover_gemini_models_uses_static_defaults() {
         let models = discover_models_for_harness(Harness::Gemini).await.unwrap();
         assert_eq!(models, default_models_for_harness(Harness::Gemini));
+    }
+
+    #[tokio::test]
+    async fn discover_codex_models() {
+        if super::super::path_search::resolve_command("codex-acp").is_none() {
+            eprintln!("codex-acp not installed, skipping");
+            return;
+        }
+        let models = discover_models_for_harness(Harness::Codex).await;
+        match &models {
+            Ok(m) => eprintln!("Codex models discovered: {m:?}"),
+            Err(e) => eprintln!("Codex model discovery error: {e:#}"),
+        }
+        assert!(
+            models.is_ok(),
+            "Codex ACP handshake failed: {}",
+            models.unwrap_err()
+        );
+        assert!(
+            !models.unwrap().is_empty(),
+            "Codex ACP returned no models from config_options"
+        );
     }
 
     #[tokio::test]
