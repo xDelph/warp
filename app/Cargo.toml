@@ -173,6 +173,7 @@ rand.workspace = true
 rangemap.workspace = true
 rayon.workspace = true
 regex-automata.workspace = true
+rmux-sdk = { version = "0.8", optional = true }
 regex.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
@@ -510,6 +511,7 @@ cross_repo_context = []
 codebase_index_persistence = ["full_source_code_embedding"]
 well_known_mcp_ids = []
 factory_mcp = []
+rmux_native_pane = ["dep:rmux-sdk"]
 default = [
     "local_acp",
     "agent_mode",

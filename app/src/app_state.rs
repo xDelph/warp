@@ -148,6 +148,11 @@ pub enum LeafContents {
     ExecutionProfileEditor,
     CodeReview(CodeReviewPaneSnapshot),
     AmbientAgent(AmbientAgentPaneSnapshot),
+    /// An RMUX-backed native terminal pane (behind
+    /// `FeatureFlag::RmuxNativePane`). Kept as a plain, always-compiled
+    /// snapshot type so restoring a saved session never depends on the
+    /// `rmux_native_pane` Cargo feature.
+    RmuxTerminal(RmuxTerminalPaneSnapshot),
     /// The in-app network log pane. Not persisted across restarts because the
     /// backing log is an in-memory ring buffer that starts empty on launch.
     NetworkLog,
@@ -174,7 +179,12 @@ impl LeafContents {
             LeafContents::NetworkLog
             // Environment management panes are opened on-demand via workspace
             // actions and have no persistable state.
-            | LeafContents::EnvironmentManagement(_) => false,
+            | LeafContents::EnvironmentManagement(_)
+            // Reconnecting to an RMUX pane across a full app restart depends
+            // on an external daemon that may no longer be running; V1 only
+            // restores RMUX panes within a live session (e.g. moving a pane
+            // to another tab/window), not from the on-disk app-state DB.
+            | LeafContents::RmuxTerminal(_) => false,
             LeafContents::Terminal(_)
             | LeafContents::Notebook(_)
             | LeafContents::AIDocument(_)
@@ -199,6 +209,22 @@ pub struct AmbientAgentPaneSnapshot {
     // `task_id` is purposefully optional,
     // as you can have a valid state (i.e. an empty cloud mode pane) where it is None.
     pub task_id: Option<AmbientAgentTaskId>,
+}
+
+/// Snapshot of an RMUX-backed native terminal pane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RmuxTerminalPaneSnapshot {
+    pub uuid: Vec<u8>,
+    /// The RMUX session name to re-attach to.
+    pub session_name: String,
+    /// Stable RMUX pane id, when known. `None` re-attaches to whichever pane
+    /// is currently active in the session rather than a specific pane.
+    pub pane_id: Option<u32>,
+    pub cwd: Option<String>,
+    /// Whether Warp created this pane (and should close it on
+    /// `DetachType::Closed`) versus merely attaching to one that already
+    /// existed (in which case Warp only ever detaches).
+    pub warp_created: bool,
 }
 
 /// Snapshot of the contents of a terminal pane.

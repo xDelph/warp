@@ -443,6 +443,18 @@ impl PaneContent for TerminalPane {
     }
 
     fn snapshot(&self, app: &AppContext) -> LeafContents {
+        #[cfg(feature = "rmux_native_pane")]
+        {
+            let terminal_manager = self.terminal_manager(app);
+            if let Some(rmux_manager) = terminal_manager
+                .as_ref(app)
+                .as_any()
+                .downcast_ref::<crate::terminal::rmux::RmuxTerminalManager>()
+            {
+                return LeafContents::RmuxTerminal(rmux_manager.snapshot(self.uuid.clone()));
+            }
+        }
+
         let view = self.terminal_view(app).as_ref(app);
         let is_active = view.is_active_session(app);
 

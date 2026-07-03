@@ -894,7 +894,7 @@ pub enum FeatureFlag {
     SuperGrok,
 
     /// Gates Gemini Enterprise (GEAP) BYOLLM, which lets users
-    /// route eliglible models to GEAP instead of Warp-managed inference.
+    /// route eligible models to GEAP instead of Warp-managed inference.
     GeminiEnterprise,
 
     /// Gates NLD input classification matching the buffer against agent
@@ -929,7 +929,7 @@ pub enum FeatureFlag {
     /// eliminating seams between adjacent box-drawing cells in the terminal.
     BoxDrawingGlyphs,
 
-    /// Enables cloud agent runner selection: the `oz runner` CRUD commands
+    /// Enables cloud agent runner selection: the CLI CRUD commands
     /// for managing runners via the CLI, and the Runner dropdown in the
     /// orchestration (`run_agents`) confirmation card and plan-card config
     /// block for choosing a runner when starting remote child agents.
@@ -946,41 +946,41 @@ pub enum FeatureFlag {
 
     /// Automatically attaches the Warp-hosted Factory MCP server
     /// (`/api/v1/mcp/factory`) to agents as a built-in MCP server,
-    /// authenticated with the logged-in user's session token. No manual MCP
+    /// authenticated with the logged-in session token. No manual MCP
     /// setup or API key required.
     FactoryMcp,
 
     /// Gates client-side display of the real dollar cost (from `RequestCost.cost_in_cents`)
     /// alongside credits in the GUI footer and TUI. Mirrors the server-side
     /// `PricingTransparencyEnabled` flag in warp-server, but is a fully independent
-    /// flag — the two do not sync automatically. Consolidated from the former
-    /// `TuiCostTransparency` flag: when enabled (dogfood/staging and local/dev
-    /// builds), the TUI footer usage entry follows the persisted
-    /// `agents.usage_display_mode` setting and is click-to-toggleable between
-    /// credits and dollars; when disabled (prod/stable), it falls back to a
-    /// static, non-interactive credits total. Will also gate the GUI footer's
-    /// dollar display once that's built.
+    /// flag — the two do not sync automatically.
     PricingTransparency,
 
     /// Enables periodic workspace-handoff checkpoints during a cloud agent run,
     /// rather than only uploading a workspace snapshot once at end-of-run.
-    /// Requires `OzHandoff` to also be enabled; a no-op for local runs and when
-    /// `--no-snapshot` is set. Off by default while the coordinator rolls out.
+    /// Requires `OzHandoff` to also be enabled.
     PeriodicHandoffCheckpoints,
 
     /// Observes Ctrl-C (`0x03`) written on the shared-session viewer input
     /// path to a terminal with a working, rich-status-capable CLI agent
     /// session (e.g. Claude Code). Arms a short grace window; if no further
     /// plugin activity is seen, the session (and its ambient task) resolves
-    /// to `Cancelled`. Purely client-side status synthesis: the keystroke is
-    /// always forwarded unchanged and the harness process/sandbox are never
-    /// signaled or torn down.
+    /// to `Cancelled`. Purely client-side status synthesis.
     CtrlCCancelsThirdPartyHarness,
 
     /// Attaches process-tree liveness signals to long-running command
     /// snapshots, giving the agent evidence that a silent command is still
     /// doing work before it decides to cancel.
     LrcActivitySignal,
+
+    /// Gates the TUI cost footer's credits⇄dollars toggle.
+    TuiCostTransparency,
+
+    /// Gates the RMUX-backed native terminal pane (V1: create, attach,
+    /// render, resize, input, focus, and close a single RMUX pane inside
+    /// the existing pane group / terminal view UX). Requires an external
+    /// `rmux` daemon/binary; not enabled outside dogfood.
+    RmuxNativePane,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -1058,6 +1058,10 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::CtrlCCancelsThirdPartyHarness,
     FeatureFlag::WarpingModelName,
     FeatureFlag::LrcActivitySignal,
+    FeatureFlag::WellKnownMcpIds,
+    FeatureFlag::FactoryMcp,
+    FeatureFlag::TuiCostTransparency,
+    FeatureFlag::RmuxNativePane,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

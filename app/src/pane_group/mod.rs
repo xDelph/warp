@@ -324,6 +324,10 @@ pub enum PaneGroupAction {
     ToggleMaximizePane,
     HandleFocusChange,
     FocusTerminalView(EntityId),
+    /// Splits a new RMUX-backed native terminal pane off of the focused
+    /// pane. Behind `FeatureFlag::RmuxNativePane`; a no-op build-time no-op
+    /// when the `rmux_native_pane` Cargo feature isn't compiled in.
+    AddRmuxPane(Direction),
 }
 #[derive(PartialEq)]
 enum PaneRemovalReason {
@@ -485,6 +489,15 @@ pub fn init(app: &mut AppContext) {
         .with_context_predicate(id!("PaneGroup") & !id!("PaneGroup_PaneDragging"))
         .with_custom_action(CustomAction::SplitPaneRight)
         .with_enabled(|| ContextFlag::CreateNewSession.is_enabled()),
+        EditableBinding::new(
+            "pane_group:add_rmux_pane",
+            "New RMUX pane",
+            PaneGroupAction::AddRmuxPane(Direction::Right),
+        )
+        .with_context_predicate(id!("PaneGroup") & !id!("PaneGroup_PaneDragging"))
+        .with_enabled(|| {
+            FeatureFlag::RmuxNativePane.is_enabled() && ContextFlag::CreateNewSession.is_enabled()
+        }),
         EditableBinding::new(
             TOGGLE_MAXIMIZE_PANE_BINDING_NAME,
             "Toggle Maximize Active Pane",
@@ -2007,6 +2020,48 @@ impl PaneGroup {
                     active_session: None,
                 };
                 Ok((PaneData::new(pane_id), focus))
+            }
+            LeafContents::RmuxTerminal(snapshot) => {
+                if !FeatureFlag::RmuxNativePane.is_enabled() {
+                    return Err(anyhow::anyhow!("RMUX native pane support is not enabled"));
+                }
+
+                #[cfg(feature = "rmux_native_pane")]
+                {
+                    let spec = crate::terminal::rmux::RmuxPaneSpec::from_snapshot(&snapshot);
+                    let (terminal_view, terminal_manager) = Self::create_rmux_pane_terminal(
+                        spec,
+                        resources,
+                        view_size,
+                        ctx.window_id(),
+                        model_event_sender.clone(),
+                        ctx,
+                    );
+
+                    let pane_data = TerminalPane::new(
+                        snapshot.uuid,
+                        terminal_manager,
+                        terminal_view,
+                        model_event_sender,
+                        ctx,
+                    );
+                    let terminal_pane_id = pane_data.terminal_pane_id();
+                    let pane_id = terminal_pane_id.into();
+                    pane_contents.insert(pane_id, Box::new(pane_data));
+
+                    let focus = InitialFocus {
+                        focused_pane: leaf.is_focused.then_some(pane_id),
+                        active_session: Some(terminal_pane_id),
+                    };
+                    Ok((PaneData::new(pane_id), focus))
+                }
+                #[cfg(not(feature = "rmux_native_pane"))]
+                {
+                    let _ = snapshot;
+                    Err(anyhow::anyhow!(
+                        "This build wasn't compiled with RMUX native pane support"
+                    ))
+                }
             }
             LeafContents::CodeReview(_) => {
                 Err(anyhow::anyhow!("Code review panes are no longer supported"))
@@ -6681,6 +6736,89 @@ impl PaneGroup {
         )
     }
 
+    /// Creates the `TerminalView`/`TerminalManager` pair for an RMUX-backed
+    /// pane. Used by both live pane creation (`create_rmux_pane_data`, which
+    /// has `&self` to source `TerminalViewResources` from) and session
+    /// restoration (`restore_pane_leaf`, which is an associated function).
+    #[cfg(feature = "rmux_native_pane")]
+    fn create_rmux_pane_terminal(
+        spec: crate::terminal::rmux::RmuxPaneSpec,
+        resources: TerminalViewResources,
+        view_size: Vector2F,
+        window_id: WindowId,
+        model_event_sender: Option<SyncSender<ModelEvent>>,
+        ctx: &mut ViewContext<Self>,
+    ) -> (ViewHandle<TerminalView>, ModelHandle<Box<dyn TerminalManager>>) {
+        let terminal_manager = crate::terminal::rmux::RmuxTerminalManager::create_model(
+            spec,
+            resources,
+            view_size,
+            window_id,
+            model_event_sender,
+            ctx,
+        );
+        let view = terminal_manager.as_ref(ctx).view();
+        (view, terminal_manager)
+    }
+
+    /// Creates a new RMUX-backed terminal pane, wrapping it in the same
+    /// manager-agnostic `TerminalPane` used for local/remote/shared-session
+    /// terminals.
+    #[cfg(feature = "rmux_native_pane")]
+    fn create_rmux_pane_data(
+        &self,
+        spec: crate::terminal::rmux::RmuxPaneSpec,
+        ctx: &mut ViewContext<Self>,
+    ) -> (TerminalPane, ViewHandle<TerminalView>) {
+        let uuid = Uuid::new_v4();
+        let resources = TerminalViewResources {
+            tips_completed: self.tips_completed.clone(),
+            server_api: self.server_api.clone(),
+            model_event_sender: self.model_event_sender.clone(),
+        };
+        let view_bounds = Self::estimated_view_bounds(ctx);
+        let window_id = ctx.window_id();
+
+        let (view, terminal_manager) = Self::create_rmux_pane_terminal(
+            spec,
+            resources,
+            view_bounds.size(),
+            window_id,
+            self.model_event_sender.clone(),
+            ctx,
+        );
+
+        let pane_data = TerminalPane::new(
+            uuid.as_bytes().to_vec(),
+            terminal_manager,
+            view.clone(),
+            self.model_event_sender.clone(),
+            ctx,
+        );
+        (pane_data, view)
+    }
+
+    /// Splits a new RMUX-backed pane off of the currently focused pane, in
+    /// `direction`, and focuses it. Behind `FeatureFlag::RmuxNativePane`.
+    #[cfg(feature = "rmux_native_pane")]
+    pub fn add_rmux_pane(&mut self, direction: Direction, ctx: &mut ViewContext<Self>) -> Option<PaneId> {
+        let startup_directory =
+            self.startup_path_for_new_session(self.active_session_id(ctx), ctx);
+        let mut spec = crate::terminal::rmux::RmuxPaneSpec::new(
+            format!("warp-{}", Uuid::new_v4().simple()),
+            crate::terminal::rmux::RmuxPaneOwnership::WarpCreated,
+        );
+        if let Some(cwd) = startup_directory.and_then(|path| path.to_str().map(str::to_owned)) {
+            spec = spec.with_cwd(cwd);
+        }
+
+        let (pane_data, _view) = self.create_rmux_pane_data(spec, ctx);
+        let base_pane_id = self.focused_pane_id(ctx);
+        let pane_id = self.add_pane(direction, Some(base_pane_id), Box::new(pane_data), true, ctx);
+        ctx.emit(Event::AppStateChanged);
+        pane_id
+    }
+
     /// Creates a new terminal session and wraps it in a `TerminalPane`.
     /// This is the shared session-creation boilerplate used by both
     /// `add_session_in_directory` and `insert_terminal_pane_hidden_for_child_agent`.
@@ -8259,6 +8397,19 @@ impl TypedActionView for PaneGroup {
             } => self.move_pane(*id, *target_pane_id, *direction, ctx),
             HandleFocusChange => self.handle_focus_change(ctx),
             FocusTerminalView(terminal_view_id) => self.focus_terminal_view(*terminal_view_id, ctx),
+            AddRmuxPane(direction) => {
+                #[cfg(feature = "rmux_native_pane")]
+                {
+                    self.add_rmux_pane(*direction, ctx);
+                }
+                #[cfg(not(feature = "rmux_native_pane"))]
+                {
+                    let _ = direction;
+                    log::warn!(
+                        "Ignoring pane_group:add_rmux_pane: this build wasn't compiled with the `rmux_native_pane` feature"
+                    );
+                }
+            }
         }
     }
 }
