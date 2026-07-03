@@ -1523,6 +1523,21 @@ impl TerminalModel {
         self.event_proxy.send_wakeup_event();
     }
 
+    /// Applies a full-screen redraw of externally-sourced terminal content
+    /// (an ANSI byte sequence synthesized from an already-captured grid
+    /// snapshot, e.g. from an RMUX pane) rather than a live PTY byte stream.
+    ///
+    /// `bytes` is fed through a fresh [`super::ansi::Processor`] each call,
+    /// so it must be self-contained (its own reset/clear/cursor-position
+    /// sequences), matching how `crate::terminal::rmux::grid` renders a
+    /// snapshot.
+    #[cfg(feature = "rmux_native_pane")]
+    pub fn apply_external_pane_snapshot(&mut self, bytes: &[u8]) {
+        let mut processor = super::ansi::Processor::default();
+        processor.parse_bytes(self, bytes, &mut std::io::sink());
+        self.event_proxy.send_wakeup_event();
+    }
+
     pub fn obfuscate_secrets(&self) -> ObfuscateSecrets {
         self.obfuscate_secrets
     }

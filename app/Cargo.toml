@@ -173,6 +173,7 @@ qrcode.workspace = true
 rand.workspace = true
 rangemap.workspace = true
 rayon.workspace = true
+rmux-sdk = { version = "0.8", optional = true }
 regex-automata = "0.4.6"
 regex.workspace = true
 reqwest.workspace = true
@@ -496,6 +497,7 @@ crash_reporting = [
 creating_shared_sessions = []
 cross_repo_context = []
 codebase_index_persistence = ["full_source_code_embedding"]
+rmux_native_pane = ["dep:rmux-sdk"]
 default = [
     "agent_mode",
     "viewing_shared_sessions",

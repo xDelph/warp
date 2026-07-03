@@ -886,6 +886,12 @@ pub enum FeatureFlag {
     /// Gates the SuperGrok feature, which lets users
     /// connect a Grok subscription instead of pasting an API key.
     SuperGrok,
+
+    /// Gates the RMUX-backed native terminal pane (V1: create, attach,
+    /// render, resize, input, focus, and close a single RMUX pane inside
+    /// the existing pane group / terminal view UX). Requires an external
+    /// `rmux` daemon/binary; not enabled outside dogfood.
+    RmuxNativePane,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =
@@ -954,6 +960,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::AsyncFind,
     FeatureFlag::GPTConfigurableContextWindow,
     FeatureFlag::RestorePromptOnInlineModelSelectorSearch,
+    FeatureFlag::RmuxNativePane,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

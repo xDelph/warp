@@ -66,6 +66,8 @@ pub mod recorder;
 pub mod remote_tty;
 pub mod resizable_data;
 pub mod rich_history;
+#[cfg(feature = "rmux_native_pane")]
+pub mod rmux;
 pub mod safe_mode_settings;
 mod secret_regex_updater;
 pub mod session_settings;
