@@ -4766,6 +4766,10 @@ impl TerminalView {
         self.block_completed_callbacks.push(Box::new(callback));
     }
 
+    #[cfg_attr(
+        all(feature = "local_acp", not(target_family = "wasm")),
+        allow(dead_code)
+    )]
     fn set_pending_cloud_mode_start_callback(
         &mut self,
         callback: TerminalViewCallback,
@@ -4786,6 +4790,10 @@ impl TerminalView {
         ));
     }
 
+    #[cfg_attr(
+        all(feature = "local_acp", not(target_family = "wasm")),
+        allow(dead_code)
+    )]
     fn clear_pending_cloud_mode_start_callback(&mut self) {
         if let Some(handle) = self.pending_cloud_mode_start_abort_handle.take() {
             handle.abort();
@@ -7687,6 +7695,59 @@ impl TerminalView {
         } else {
             None
         }
+    }
+
+    /// Starts a local ACP query when the user setting is enabled.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    pub(crate) fn execute_local_acp_query(
+        &mut self,
+        prompt: String,
+        ctx: &mut ViewContext<Self>,
+    ) -> bool {
+        if !crate::ai::local_acp::local_acp_enabled(ctx) || prompt.is_empty() {
+            return false;
+        }
+
+        let Some((conversation_id, stream_id)) =
+            self.ai_controller.update(ctx, |controller, ctx| {
+                controller.start_local_acp_request(prompt.clone(), ctx)
+            })
+        else {
+            return false;
+        };
+
+        let cwd = self
+            .active_session_path_if_local(ctx)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let (harness, model_id) =
+            crate::ai::acp::harness_picker::LocalAcpHarnessModel::handle(ctx).update(
+                ctx,
+                |model, _ctx| {
+                    (
+                        model.selected_harness(),
+                        model.selected_model_id().map(ToOwned::to_owned),
+                    )
+                },
+            );
+
+        if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(
+            prompt,
+            harness,
+            model_id,
+            cwd,
+            conversation_id,
+            stream_id,
+            self.view_id,
+            ctx,
+        ) {
+            self.show_error_toast(
+                format!("Couldn't start local ACP agent: {error:#}"),
+                ctx,
+            );
+            return false;
+        }
+
+        true
     }
 
     pub fn input(&self) -> &ViewHandle<Input> {
@@ -21214,6 +21275,10 @@ impl TerminalView {
         }
     }
 
+    #[cfg_attr(
+        all(feature = "local_acp", not(target_family = "wasm")),
+        allow(dead_code)
+    )]
     fn restore_followup_prompt_after_failed_submission(
         &mut self,
         prompt: &str,
@@ -21230,6 +21295,10 @@ impl TerminalView {
         ctx.notify();
     }
 
+    #[cfg_attr(
+        all(feature = "local_acp", not(target_family = "wasm")),
+        allow(dead_code)
+    )]
     fn try_submit_pending_cloud_followup(
         &mut self,
         prompt: String,
@@ -21336,6 +21405,35 @@ impl TerminalView {
                     ctx,
                 );
             }
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            InputEvent::ExecuteLocalAcpQuery {
+                prompt,
+                harness,
+                model_id,
+                cwd,
+                conversation_id,
+                stream_id,
+                terminal_view_id,
+            } => {
+                if !crate::ai::local_acp::local_acp_enabled(ctx) {
+                    return;
+                }
+                if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(
+                    prompt.clone(),
+                    *harness,
+                    model_id.clone(),
+                    cwd.clone(),
+                    *conversation_id,
+                    stream_id.clone(),
+                    *terminal_view_id,
+                    ctx,
+                ) {
+                    self.show_error_toast(
+                        format!("Couldn't start local ACP agent: {error:#}"),
+                        ctx,
+                    );
+                }
+            }
             InputEvent::SendAgentPrompt {
                 server_conversation_token,
                 prompt,
@@ -21348,6 +21446,14 @@ impl TerminalView {
                 });
             }
             InputEvent::SubmitCloudFollowup { prompt } => {
+                if crate::ai::local_acp::cloud_agent_disabled(ctx) {
+                    let _ = prompt;
+                    self.show_error_toast(
+                        "Cloud task continuation is unavailable.".to_string(),
+                        ctx,
+                    );
+                    return;
+                }
                 if FeatureFlag::HandoffCloudCloud.is_enabled()
                     && self.try_submit_pending_cloud_followup(prompt.clone(), ctx)
                 {
@@ -21448,7 +21554,17 @@ impl TerminalView {
                 }
             },
             InputEvent::EnterCloudAgentView { initial_prompt } => {
-                self.enter_cloud_agent_view(initial_prompt.clone(), ctx);
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
+                    self.enter_agent_view_for_new_conversation(
+                        initial_prompt.clone(),
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    );
+                } else {
+                    self.enter_cloud_agent_view(initial_prompt.clone(), ctx);
+                }
             }
             InputEvent::CreateDockerSandbox => {
                 if !FeatureFlag::LocalDockerSandbox.is_enabled() {
@@ -27410,7 +27526,17 @@ impl TypedActionView for TerminalView {
                 let mut draft_text = self.input.as_ref(ctx).buffer_text(ctx);
                 draft_text.truncate(draft_text.trim_end().len());
                 let initial_prompt = (!draft_text.trim().is_empty()).then_some(draft_text);
-                self.enter_cloud_agent_view(initial_prompt, ctx);
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
+                    self.enter_agent_view_for_new_conversation(
+                        initial_prompt,
+                        AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                        ctx,
+                    );
+                } else {
+                    self.enter_cloud_agent_view(initial_prompt, ctx);
+                }
             }
             StartNewAgentConversation { origin } => {
                 self.input.update(ctx, |input, ctx| {

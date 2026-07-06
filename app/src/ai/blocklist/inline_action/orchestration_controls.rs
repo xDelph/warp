@@ -551,28 +551,24 @@ pub fn populate_model_picker_for_harness<A: OrchestrationControlAction, V: View>
                 // harness models.
                 let mut items: Vec<MenuItem<DropdownAction>> = vec![default_model_menu_item::<A>()];
                 let availability = HarnessAvailabilityModel::as_ref(ctx_dropdown);
-                if let Some(models) = availability.models_for(harness) {
-                    for model in models {
-                        let model_id = model.id.clone();
-                        let fields = MenuItemFields::new(&model.display_name)
-                            .with_on_select_action(DropdownAction::select_action_and_close(
-                                A::model_changed(model_id),
-                            ));
-                        items.push(MenuItem::Item(fields));
-                    }
+                let models = availability.models_for_picker(harness, ctx_dropdown);
+                for model in &models {
+                    let model_id = model.id.clone();
+                    let fields = MenuItemFields::new(&model.display_name)
+                        .with_on_select_action(DropdownAction::select_action_and_close(
+                            A::model_changed(model_id),
+                        ));
+                    items.push(MenuItem::Item(fields));
                 }
                 // Find display name before set_rich_items borrows ctx_dropdown mutably.
                 let selected_display_name = if initial_model_id.is_empty() {
                     Some(DEFAULT_MODEL_LABEL.to_string())
                 } else {
                     availability
-                        .models_for(harness)
-                        .and_then(|models| {
-                            models
-                                .iter()
-                                .find(|m| m.id == initial_model_id)
-                                .map(|m| m.display_name.clone())
-                        })
+                        .models_for_picker(harness, ctx_dropdown)
+                        .into_iter()
+                        .find(|m| m.id == initial_model_id)
+                        .map(|m| m.display_name.clone())
                         .or_else(|| Some(DEFAULT_MODEL_LABEL.to_string()))
                 };
                 dropdown.set_rich_items(items, ctx_dropdown);
@@ -617,8 +613,9 @@ pub fn is_model_in_filtered_choices<V: View>(
             }
             let availability = HarnessAvailabilityModel::as_ref(ctx);
             availability
-                .models_for(harness)
-                .is_some_and(|models| models.iter().any(|m| m.id == model_id))
+                .models_for_picker(harness, ctx)
+                .iter()
+                .any(|m| m.id == model_id)
         }
     }
 }
@@ -661,7 +658,7 @@ pub fn populate_harness_picker<A: OrchestrationControlAction, V: View>(
     let initial_harness = initial_harness.to_string();
     dropdown.update(ctx, |dropdown, ctx_dropdown| {
         let availability = HarnessAvailabilityModel::as_ref(ctx_dropdown);
-        let harnesses = availability.available_harnesses();
+        let harnesses = availability.harnesses_for_selector(ctx_dropdown);
 
         let resolve_entry_harness = |harness: Harness, display_name: &str| match harness {
             Harness::Unknown => [
@@ -1586,11 +1583,12 @@ pub fn sync_picker_selections<A: OrchestrationControlAction, V: View>(
                         Some(DEFAULT_MODEL_LABEL.to_string())
                     } else {
                         let availability = HarnessAvailabilityModel::as_ref(ctx_dropdown);
-                        availability.models_for(harness).and_then(|models| {
-                            models
-                                .iter()
-                                .find(|m| m.id == target_model_id)
-                                .map(|m| m.display_name.clone())
+                        availability.models_for_picker(harness, ctx_dropdown).into_iter().find_map(|model| {
+                            if model.id == target_model_id {
+                                Some(model.display_name.clone())
+                            } else {
+                                None
+                            }
                         })
                     }
                 }

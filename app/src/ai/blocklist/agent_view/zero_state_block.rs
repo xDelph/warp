@@ -223,6 +223,11 @@ impl AgentViewZeroStateBlock {
             }
         });
         ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                ctx.notify();
+                return;
+            }
+
             let should_rerender_for_oz_updates_visibility = !me.origin.is_cloud_agent()
                 && matches!(
                     event,
@@ -399,11 +404,23 @@ impl View for AgentViewZeroStateBlock {
         let appearance = Appearance::as_ref(app);
         let theme = appearance.theme();
 
+        let use_local_acp = crate::ai::local_acp::local_acp_enabled(app);
+
         let header_props = if self.origin.is_cloud_agent() {
-            HeaderProps {
-                title: "New Oz cloud agent conversation".into(),
-                description: AgentViewDescription::CloudModeWithDocsLink,
-                icon: Icon::OzCloud,
+            if use_local_acp {
+                HeaderProps {
+                    title: "New local ACP agent conversation".into(),
+                    description: AgentViewDescription::PlainText(vec![
+                        "Send a prompt below to start a local agent conversation".into(),
+                    ]),
+                    icon: Icon::AgentMode,
+                }
+            } else {
+                HeaderProps {
+                    title: "New Oz cloud agent conversation".into(),
+                    description: AgentViewDescription::CloudModeWithDocsLink,
+                    icon: Icon::OzCloud,
+                }
             }
         } else {
             let mut local_description =
@@ -417,9 +434,17 @@ impl View for AgentViewZeroStateBlock {
             }
 
             HeaderProps {
-                title: "New Oz agent conversation".into(),
+                title: if use_local_acp {
+                    "New local ACP agent conversation".into()
+                } else {
+                    "New Oz agent conversation".into()
+                },
                 description: AgentViewDescription::PlainText(vec![local_description.into()]),
-                icon: Icon::Oz,
+                icon: if use_local_acp {
+                    Icon::AgentMode
+                } else {
+                    Icon::Oz
+                },
             }
         };
 
@@ -725,25 +750,26 @@ fn render_body(props: ZeroStateBodyProps<'_>, app: &AppContext) -> Vec<Box<dyn E
         ) {
         vec![recent_conversations_section]
     } else {
-        let mut body_items = vec![
-            render_standard_message(
-                Message::new(vec![MessageItem::clickable(
-                    vec![
-                        MessageItem::keystroke(ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE.clone()),
-                        MessageItem::text("start a new agent conversation"),
-                    ],
-                    |ctx| {
-                        ctx.dispatch_typed_action(TerminalAction::StartNewAgentConversation {
-                            origin: AgentViewEntryOrigin::Input {
-                                was_prompt_autodetected: false,
-                            },
-                        });
-                    },
-                    state_handles.start_new_conversation.clone(),
-                )]),
-                app,
-            ),
-            render_standard_message(
+        let mut body_items = vec![render_standard_message(
+            Message::new(vec![MessageItem::clickable(
+                vec![
+                    MessageItem::keystroke(ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE.clone()),
+                    MessageItem::text("start a new agent conversation"),
+                ],
+                |ctx| {
+                    ctx.dispatch_typed_action(TerminalAction::StartNewAgentConversation {
+                        origin: AgentViewEntryOrigin::Input {
+                            was_prompt_autodetected: false,
+                        },
+                    });
+                },
+                state_handles.start_new_conversation.clone(),
+            )]),
+            app,
+        )];
+
+        if !crate::ai::local_acp::cloud_agent_disabled(app) {
+            body_items.push(render_standard_message(
                 Message::new(vec![MessageItem::clickable(
                     vec![
                         MessageItem::keystroke(
@@ -757,24 +783,25 @@ fn render_body(props: ZeroStateBodyProps<'_>, app: &AppContext) -> Vec<Box<dyn E
                     state_handles.start_cloud_conversation.clone(),
                 )]),
                 app,
-            ),
-            render_standard_message(
-                Message::new(vec![MessageItem::clickable(
-                    vec![
-                        MessageItem::keystroke(Keystroke {
-                            key: "/model".to_owned(),
-                            ..Default::default()
-                        }),
-                        MessageItem::text("switch model"),
-                    ],
-                    |ctx| {
-                        ctx.dispatch_typed_action(TerminalAction::OpenModelSelector);
-                    },
-                    state_handles.switch_model.clone(),
-                )]),
-                app,
-            ),
-        ];
+            ));
+        }
+
+        body_items.push(render_standard_message(
+            Message::new(vec![MessageItem::clickable(
+                vec![
+                    MessageItem::keystroke(Keystroke {
+                        key: "/model".to_owned(),
+                        ..Default::default()
+                    }),
+                    MessageItem::text("switch model"),
+                ],
+                |ctx| {
+                    ctx.dispatch_typed_action(TerminalAction::OpenModelSelector);
+                },
+                state_handles.switch_model.clone(),
+            )]),
+            app,
+        ));
 
         // Only show "escape to go back" if there's a parent terminal
         if has_parent_terminal {

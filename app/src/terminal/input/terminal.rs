@@ -68,6 +68,17 @@ impl Input {
                 .finish(),
         );
 
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::local_acp_enabled(app) {
+            column.add_child(
+                SavePosition::new(
+                    ChildView::new(&self.agent_input_footer).finish(),
+                    &self.prompt_save_position_id(),
+                )
+                .finish(),
+            );
+        }
+
         if should_show_terminal_input_message_bar(&model, app) {
             column.add_child(
                 Clipped::new(ChildView::new(&self.terminal_input_message_bar).finish()).finish(),

@@ -949,6 +949,10 @@ pub struct AIBlock {
     /// Map from web fetch message IDs to their view handles.
     web_fetch_views: HashMap<MessageId, ViewHandle<WebFetchView>>,
 
+    /// Map from Local ACP edit tool-call message IDs to read-only diff views.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    local_acp_edits: HashMap<MessageId, RequestedEdit>,
+
     /// Map from todo list IDs to their states.
     todo_list_states: HashMap<MessageId, TodoListElementState>,
 
@@ -1496,6 +1500,8 @@ impl AIBlock {
             search_codebase_view: Default::default(),
             web_search_views: Default::default(),
             web_fetch_views: Default::default(),
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            local_acp_edits: Default::default(),
             requested_commands_to_auto_collapse: Default::default(),
             review_changes_button,
             open_all_comments_button,
@@ -2188,6 +2194,20 @@ impl AIBlock {
                     .or_insert_with(CollapsibleElementState::collapsed);
             }
 
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            if let AIAgentOutputMessageType::LocalAcpToolCall(tool_call) = &message.message {
+                if tool_call.has_visible_body() {
+                    self.collapsible_block_states
+                        .entry(message.id.clone())
+                        .or_insert_with(CollapsibleElementState::collapsed);
+                }
+                if tool_call.kind == crate::ai::agent::local_acp_tool_call::LocalAcpToolKind::Edit
+                    && !tool_call.diffs.is_empty()
+                {
+                    self.ensure_local_acp_edit_view(&message.id, tool_call, ctx);
+                }
+            }
+
             // Register collapsible state for orchestration action messages.
             let orchestration_message_display_mode =
                 AISettings::as_ref(ctx).orchestration_message_display_mode;
@@ -2436,6 +2456,8 @@ impl AIBlock {
                 | AIAgentOutputMessageType::ArtifactCreated(_)
                 | AIAgentOutputMessageType::SkillInvoked(_)
                 | AIAgentOutputMessageType::EventsFromAgents { .. } => {}
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                AIAgentOutputMessageType::LocalAcpToolCall(_) => {}
             }
         }
     }
@@ -3361,6 +3383,47 @@ impl AIBlock {
                 diff_view.set_state(state, ctx);
             });
         }
+    }
+
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    fn ensure_local_acp_edit_view(
+        &mut self,
+        message_id: &MessageId,
+        tool_call: &crate::ai::agent::local_acp_tool_call::LocalAcpToolCallMessage,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let current_working_directory = self
+            .active_session
+            .as_ref(ctx)
+            .current_working_directory()
+            .cloned();
+        let file_diffs =
+            file_diffs_from_local_acp_diffs(&tool_call.diffs, &self.shell_launch_data, &current_working_directory);
+
+        if let Some(existing) = self.local_acp_edits.get(message_id) {
+            if !existing.view.as_ref(ctx).is_pending_diffs_empty() {
+                return;
+            }
+            existing.view.update(ctx, |view, ctx| {
+                view.set_candidate_diffs(file_diffs, ctx);
+            });
+            ctx.notify();
+            return;
+        }
+
+        let action_id = AIAgentActionId::from(format!(
+            "local-acp-edit-{}",
+            tool_call.tool_call_id
+        ));
+        let view = ctx.add_typed_action_view(|ctx| {
+            CodeDiffView::new_view_only(&action_id, None, ctx)
+        });
+        view.update(ctx, |view, ctx| {
+            view.set_candidate_diffs(file_diffs, ctx);
+        });
+        self.local_acp_edits
+            .insert(message_id.clone(), RequestedEdit::new(view));
+        ctx.notify();
     }
 
     /// Handle a new requested command received from the server. This will update the existing
@@ -6913,6 +6976,37 @@ impl AIBlock {
         self.run_agents_card_views.insert(action_id.clone(), view);
     }
 }
+
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+fn file_diffs_from_local_acp_diffs(
+    diffs: &[crate::ai::agent::local_acp_tool_call::LocalAcpDiff],
+    shell_launch_data: &Option<ShellLaunchData>,
+    current_working_directory: &Option<String>,
+) -> Vec<crate::ai::blocklist::inline_action::code_diff_view::FileDiff> {
+    use crate::ai::acp::diff_window::file_diff_from_old_new;
+    use crate::ai::paths::host_native_absolute_path;
+
+    const DIFF_CONTEXT_LINES: usize = 5;
+
+    diffs
+        .iter()
+        .map(|diff| {
+            let path = host_native_absolute_path(
+                &diff.path,
+                shell_launch_data,
+                current_working_directory,
+            );
+            let on_disk = std::fs::read_to_string(&path).ok();
+            let (old_full, new_full) = crate::ai::acp::diff_window::resolve_edit_old_new(
+                diff.old_text.clone(),
+                diff.new_text.clone(),
+                on_disk,
+            );
+            file_diff_from_old_new(&old_full, &new_full, path, DIFF_CONTEXT_LINES)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "block_tests.rs"]
 mod tests;

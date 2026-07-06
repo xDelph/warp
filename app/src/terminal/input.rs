@@ -170,6 +170,8 @@ use crate::ai::blocklist::handoff::touched_repos::{
 use crate::ai::blocklist::handoff::{HandoffLaunchAttachments, PendingCloudLaunch};
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::blocklist::{
     ai_brand_color, ai_indicator_height, render_ai_agent_mode_icon, render_ai_follow_up_icon,
     AttachmentType, BlocklistAIActionModel, BlocklistAIContextEvent, BlocklistAIContextModel,
@@ -1035,6 +1037,17 @@ pub enum Event {
     /// A disconnected Cloud Mode pane is requesting to submit a cloud follow-up.
     SubmitCloudFollowup {
         prompt: String,
+    },
+    /// A local agent pane is requesting to submit through a local ACP subprocess.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    ExecuteLocalAcpQuery {
+        prompt: String,
+        harness: Harness,
+        model_id: Option<String>,
+        cwd: PathBuf,
+        conversation_id: AIConversationId,
+        stream_id: ResponseStreamId,
+        terminal_view_id: EntityId,
     },
     /// A viewer in a shared session is requesting to cancel the active agent conversation.
     CancelSharedSessionConversation {
@@ -13069,7 +13082,7 @@ impl Input {
             {
                 if FeatureFlag::AgentHarness.is_enabled() {
                     let availability = HarnessAvailabilityModel::as_ref(ctx);
-                    if !availability.has_any_enabled_harness() {
+                    if !availability.has_any_enabled_harness(ctx) {
                         let window_id = ctx.window_id();
                         ToastStack::handle(ctx).update(ctx, |ts, ctx| {
                             ts.add_ephemeral_toast(
@@ -13924,6 +13937,59 @@ impl Input {
             return;
         }
 
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::local_acp_enabled(ctx)
+            && self.agent_view_controller.as_ref(ctx).is_active()
+        {
+            let ai_query = self.editor.as_ref(ctx).buffer_text(ctx);
+            if ai_query.is_empty() {
+                return;
+            }
+
+            IgnoredSuggestionsModel::handle(ctx).update(ctx, |model, ctx| {
+                model.remove_ignored_suggestion(ai_query.clone(), SuggestionType::AIQuery, ctx);
+            });
+
+            self.ai_input_model.update(ctx, |model, ctx| {
+                model.handle_input_buffer_submitted(ctx);
+            });
+            let cwd = self
+                .active_session_path_if_local(ctx)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            self.clear_buffer_and_reset_undo_stack(ctx);
+
+            let Some((conversation_id, stream_id)) =
+                self.ai_controller.update(ctx, |controller, ctx| {
+                    controller.start_local_acp_request(ai_query.clone(), ctx)
+                })
+            else {
+                return;
+            };
+
+            let (harness, model_id) = crate::ai::acp::harness_picker::LocalAcpHarnessModel::handle(
+                ctx,
+            )
+            .update(ctx, |model, _ctx| {
+                (
+                    model.selected_harness(),
+                    model.selected_model_id().map(ToOwned::to_owned),
+                )
+            });
+
+            ctx.emit(Event::ExecuteLocalAcpQuery {
+                prompt: ai_query,
+                harness,
+                model_id,
+                cwd,
+                conversation_id,
+                stream_id,
+                terminal_view_id: self.terminal_view_id,
+            });
+            ctx.emit(Event::ExecuteAIQuery);
+            return;
+        }
+
         let has_requests_remaining = AIRequestUsageModel::as_ref(ctx).has_requests_remaining();
 
         let has_any_ai = AIRequestUsageModel::as_ref(ctx).has_any_ai_remaining(ctx);
@@ -13982,6 +14048,11 @@ impl Input {
         self.ai_input_model.update(ctx, |model, ctx| {
             model.handle_input_buffer_submitted(ctx);
         });
+
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::cloud_agent_disabled(ctx) {
+            return;
+        }
 
         if let Some(conversation_id) = self
             .ai_context_model
@@ -15694,6 +15765,14 @@ impl TypedActionView for Input {
                 }
             }
             InputAction::OpenModelSelector => {
+                #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                if crate::ai::local_acp::local_acp_enabled(ctx) {
+                    self.close_overlays(false, ctx);
+                    self.agent_input_footer.update(ctx, |footer, ctx| {
+                        footer.open_local_acp_model_selector(ctx);
+                    });
+                    return;
+                }
                 self.open_model_selector_and_snapshot_prompt(
                     InlineModelSelectorTab::BaseAgent,
                     ctx,

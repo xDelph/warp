@@ -1306,7 +1306,7 @@ impl ConversationDetailsPanel {
         app: &AppContext,
     ) -> Option<Box<dyn Element>> {
         let availability = HarnessAvailabilityModel::as_ref(app);
-        if !availability.should_show_harness_selector() {
+        if !availability.should_show_harness_selector(app) {
             return None;
         }
         let harness = self.data.harness?;

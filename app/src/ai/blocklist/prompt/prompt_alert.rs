@@ -12,7 +12,7 @@ use crate::ai::AIRequestUsageModel;
 use crate::auth::AuthStateProvider;
 use crate::network::NetworkStatus;
 use crate::server::ids::ServerId;
-use crate::settings::PrivacySettings;
+use crate::settings::{AISettings, AISettingsChangedEvent, PrivacySettings};
 use crate::settings_view::SettingsSection;
 use crate::ui_components::icons::Icon;
 use crate::workspace::WorkspaceAction;
@@ -121,6 +121,13 @@ impl PromptAlertView {
             ctx.notify();
         });
 
+        ctx.subscribe_to_model(&AISettings::handle(ctx), |me, _, event, ctx| {
+            if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. }) {
+                me.state = Self::determine_state(ctx);
+                ctx.notify();
+            }
+        });
+
         Self {
             state: Self::determine_state(ctx),
             action_hyperlink: Default::default(),
@@ -128,9 +135,21 @@ impl PromptAlertView {
     }
 
     pub fn determine_state(app: &AppContext) -> PromptAlertState {
+        // Bypass all credit/billing checks with environment variable
+        if std::env::var("WARP_SKIP_CREDIT_CHECK").is_ok() {
+            return PromptAlertState::NoAlert;
+        }
+
         // First, if the user is offline, no AI features will work.
         if !NetworkStatus::as_ref(app).is_online() {
             return PromptAlertState::NoConnection;
+        }
+
+        // Local ACP routes through subprocesses and the user's own agent credentials,
+        // not Warp AI credits or billing gates.
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::local_acp_enabled(app) {
+            return PromptAlertState::NoAlert;
         }
 
         // Check if telemetry is disabled for free tier users.

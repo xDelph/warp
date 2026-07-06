@@ -413,6 +413,8 @@ impl OrchestrationEventService {
                     | AIAgentOutputMessageType::DebugOutput { .. }
                     | AIAgentOutputMessageType::ArtifactCreated(_)
                     | AIAgentOutputMessageType::SkillInvoked(_) => {}
+                    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+                    AIAgentOutputMessageType::LocalAcpToolCall(_) => {}
                 }
             }
         }
