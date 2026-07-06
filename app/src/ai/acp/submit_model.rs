@@ -52,7 +52,7 @@ enum LocalAcpStreamEvent {
 
 pub(crate) struct LocalAcpSubmitModel {
     active_submission: Option<LocalAcpSubmitRequest>,
-    workers: HashMap<LocalAcpWorkerKey, mpsc::UnboundedSender<LocalAcpWorkerRequest>>,
+    workers: HashMap<LocalAcpWorkerKey, mpsc::UnboundedSender<LocalAcpWorkerMessage>>,
 }
 
 impl LocalAcpSubmitModel {
@@ -161,20 +161,81 @@ impl LocalAcpSubmitModel {
         let sender = self
             .workers
             .entry(key.clone())
-            .or_insert_with(|| spawn_local_acp_worker())
+            .or_insert_with(spawn_local_acp_worker)
             .clone();
 
-        if let Err(error) = sender.send(worker_request) {
+        if let Err(error) = sender.send(LocalAcpWorkerMessage::Submit(worker_request)) {
             self.workers.remove(&key);
             let sender = self
                 .workers
                 .entry(key)
-                .or_insert_with(|| spawn_local_acp_worker())
+                .or_insert_with(spawn_local_acp_worker)
                 .clone();
-            let _ = sender.send(error.0);
+            let submit_request = match error.0 {
+                LocalAcpWorkerMessage::Submit(request) => request,
+                _ => return result_rx,
+            };
+            let _ = sender.send(LocalAcpWorkerMessage::Submit(submit_request));
         }
 
         result_rx
+    }
+
+    pub(crate) fn warm_worker(
+        &mut self,
+        harness: Harness,
+        model_id: Option<String>,
+        gemini_api_key: Option<String>,
+        cwd: PathBuf,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        let key = LocalAcpWorkerKey {
+            harness,
+            cwd: cwd.clone(),
+        };
+        let (result_tx, result_rx) = oneshot::channel();
+        let worker_request = LocalAcpWarmRequest {
+            harness,
+            cwd,
+            model_id,
+            gemini_api_key,
+            result_tx,
+        };
+
+        let sender = self
+            .workers
+            .entry(key.clone())
+            .or_insert_with(spawn_local_acp_worker)
+            .clone();
+
+        if let Err(error) = sender.send(LocalAcpWorkerMessage::Warm(worker_request)) {
+            self.workers.remove(&key);
+            let sender = self
+                .workers
+                .entry(key)
+                .or_insert_with(spawn_local_acp_worker)
+                .clone();
+            let warm_request = match error.0 {
+                LocalAcpWorkerMessage::Warm(request) => request,
+                _ => return,
+            };
+            let _ = sender.send(LocalAcpWorkerMessage::Warm(warm_request));
+        }
+
+        ctx.spawn(
+            async move { result_rx.await.ok() },
+            move |_, result, _ctx| {
+                if let Some(Err(error)) = result {
+                    log::debug!(
+                        "Failed to pre-spawn local ACP worker for {harness}: {error:#}"
+                    );
+                }
+            },
+        );
+    }
+
+    pub(crate) fn shutdown_all_workers(&mut self) {
+        self.workers.clear();
     }
 }
 
@@ -205,6 +266,19 @@ struct LocalAcpWorkerRequest {
     result_tx: oneshot::Sender<Result<LocalAcpSubmitResult>>,
 }
 
+struct LocalAcpWarmRequest {
+    harness: Harness,
+    cwd: PathBuf,
+    model_id: Option<String>,
+    gemini_api_key: Option<String>,
+    result_tx: oneshot::Sender<Result<()>>,
+}
+
+enum LocalAcpWorkerMessage {
+    Submit(LocalAcpWorkerRequest),
+    Warm(LocalAcpWarmRequest),
+}
+
 struct LocalAcpWorkerSession {
     connection: Connection,
     session_id: acp::SessionId,
@@ -213,7 +287,7 @@ struct LocalAcpWorkerSession {
     applied_mode: Option<String>,
 }
 
-fn spawn_local_acp_worker() -> mpsc::UnboundedSender<LocalAcpWorkerRequest> {
+fn spawn_local_acp_worker() -> mpsc::UnboundedSender<LocalAcpWorkerMessage> {
     let (tx, rx) = mpsc::unbounded_channel();
     thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -229,24 +303,31 @@ fn spawn_local_acp_worker() -> mpsc::UnboundedSender<LocalAcpWorkerRequest> {
     tx
 }
 
-async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequest>) {
+async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerMessage>) {
     let mut session = None;
 
-    while let Some(worker_request) = rx.recv().await {
-        let result = submit_local_acp_query_on_worker(
-            &mut session,
-            worker_request.request,
-            worker_request.stream_tx,
-        )
-        .await;
-        if result.is_err() {
-            if let Some(session) = session.take() {
-                if let Err(error) = session.connection.close().await {
-                    log::debug!("Failed to close failed local ACP connection: {error:#}");
+    while let Some(message) = rx.recv().await {
+        match message {
+            LocalAcpWorkerMessage::Warm(warm_request) => {
+                warm_local_acp_session(&mut session, warm_request).await;
+            }
+            LocalAcpWorkerMessage::Submit(worker_request) => {
+                let result = submit_local_acp_query_on_worker(
+                    &mut session,
+                    worker_request.request,
+                    worker_request.stream_tx,
+                )
+                .await;
+                if result.is_err() {
+                    if let Some(session) = session.take() {
+                        if let Err(error) = session.connection.close().await {
+                            log::debug!("Failed to close failed local ACP connection: {error:#}");
+                        }
+                    }
                 }
+                let _ = worker_request.result_tx.send(result);
             }
         }
-        let _ = worker_request.result_tx.send(result);
     }
 
     if let Some(session) = session {
@@ -254,6 +335,47 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
             log::debug!("Failed to close local ACP connection: {error:#}");
         }
     }
+}
+
+async fn warm_local_acp_session(
+    session: &mut Option<LocalAcpWorkerSession>,
+    warm_request: LocalAcpWarmRequest,
+) {
+    let result = async {
+        if session.is_none() {
+            *session = Some(
+                start_local_acp_session(
+                    warm_request.harness,
+                    &warm_request.cwd,
+                    warm_request.model_id.as_deref(),
+                    warm_request.gemini_api_key.as_deref(),
+                )
+                .await?,
+            );
+        }
+
+        let session = session
+            .as_mut()
+            .expect("local ACP session exists after warm initialization");
+        apply_session_preferences(
+            warm_request.harness,
+            warm_request.model_id.as_deref(),
+            session,
+        )
+        .await?;
+        Ok(())
+    }
+    .await;
+
+    if result.is_err() {
+        if let Some(session) = session.take() {
+            if let Err(error) = session.connection.close().await {
+                log::debug!("Failed to close failed local ACP connection: {error:#}");
+            }
+        }
+    }
+
+    let _ = warm_request.result_tx.send(result);
 }
 
 async fn submit_local_acp_query_on_worker(

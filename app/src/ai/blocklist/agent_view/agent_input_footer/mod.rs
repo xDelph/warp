@@ -706,6 +706,7 @@ impl AgentInputFooter {
                 LocalAcpHarnessModelEvent::SelectionChanged => {
                     me.refresh_local_acp_openusage_summary(ctx);
                     me.update_context_window_button(ctx);
+                    crate::ai::local_acp::sync_auto_spawn_workers(ctx);
                 }
             });
         }
@@ -778,15 +779,25 @@ impl AgentInputFooter {
                 AISettingsChangedEvent::AIAutoDetectionEnabled { .. }
                     | AISettingsChangedEvent::ShouldForceDisableCloudHandoff { .. }
                     | AISettingsChangedEvent::LocalAcpEnabled { .. }
+                    | AISettingsChangedEvent::LocalAcpAutoSpawnEnabled { .. }
             ) {
                 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-                if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. })
-                    && crate::ai::local_acp::local_acp_enabled(ctx)
                 {
-                    LocalAcpHarnessModel::handle(ctx).update(ctx, |state, ctx| {
-                        state.ensure_all_models_discovered(ctx);
-                    });
-                    me.refresh_local_acp_openusage_summary(ctx);
+                    if matches!(
+                        event,
+                        AISettingsChangedEvent::LocalAcpEnabled { .. }
+                            | AISettingsChangedEvent::LocalAcpAutoSpawnEnabled { .. }
+                    ) {
+                        crate::ai::local_acp::sync_auto_spawn_workers(ctx);
+                    }
+                    if matches!(event, AISettingsChangedEvent::LocalAcpEnabled { .. })
+                        && crate::ai::local_acp::local_acp_enabled(ctx)
+                    {
+                        LocalAcpHarnessModel::handle(ctx).update(ctx, |state, ctx| {
+                            state.ensure_all_models_discovered(ctx);
+                        });
+                        me.refresh_local_acp_openusage_summary(ctx);
+                    }
                 }
                 ctx.notify()
             }
@@ -963,6 +974,7 @@ impl AgentInputFooter {
                 state.ensure_all_models_discovered(ctx);
             });
             me.refresh_local_acp_openusage_summary(ctx);
+            crate::ai::local_acp::sync_auto_spawn_workers(ctx);
         }
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);

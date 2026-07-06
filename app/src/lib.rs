@@ -2210,6 +2210,9 @@ pub(crate) fn app_callbacks(
                 telemetry_collector.flush_telemetry_events_for_shutdown(ctx);
             });
 
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            crate::ai::local_acp::shutdown_local_acp_workers(ctx);
+
             // Shutdown all LSP servers gracefully before app termination
             lsp::LspManagerModel::handle(ctx).update(ctx, |manager, ctx| {
                 manager.terminate(ctx);
@@ -2612,6 +2615,15 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
             IntervalTimer::handle(ctx).update(ctx, |timer, _| {
                 timer.mark_interval_end("WINDOWS_CREATED");
             });
+
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            {
+                ai::local_acp::register_auto_spawn_listeners(ctx);
+                ai::local_acp::sync_auto_spawn_workers(ctx);
+                ctx.on_first_frame_drawn(|ctx| {
+                    ai::local_acp::sync_auto_spawn_workers(ctx);
+                });
+            }
 
             // TODO(ben): We should skip this for LaunchMode::Test.
             #[cfg(any(target_os = "macos", target_os = "windows"))]

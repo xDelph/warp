@@ -1393,6 +1393,19 @@ define_settings_group!(AISettings, settings: [
         description: "Use local ACP agents instead of Warp server-side Oz.",
     }
 
+    // When enabled alongside local ACP, pre-spawn the selected harness agent on startup and
+    // harness changes so the first prompt does not pay process startup cost. Spawned agents
+    // are kept alive while Warp runs and are torn down on app exit.
+    local_acp_auto_spawn_enabled: LocalAcpAutoSpawnEnabled {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "agents.warp_agent.other.local_acp_auto_spawn_enabled",
+        description: "Pre-spawn the selected local ACP harness agent while Warp is running.",
+    }
+
     // Whether file-based MCP servers from third-party AI tools (e.g. Claude, Codex) should
     // be automatically detected and spawned. Warp-native config files (.warp/.mcp.json) are
     // always detected and spawned, regardless of this setting.
@@ -1691,6 +1704,10 @@ impl AISettings {
             let _ = app;
             false
         }
+    }
+
+    pub fn is_local_acp_auto_spawn_enabled(&self, app: &warpui::AppContext) -> bool {
+        self.is_local_acp_enabled(app) && *self.local_acp_auto_spawn_enabled
     }
 
     pub fn is_file_based_mcp_enabled(&self, app: &warpui::AppContext) -> bool {
