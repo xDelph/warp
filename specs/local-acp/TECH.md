@@ -58,7 +58,7 @@ Headless subprocess. Do **not** use `local_harness_launch.rs` hidden terminal pa
 | Harness | Spawn | Auth | Model |
 |---------|-------|------|-------|
 | `Claude` | `claude-agent-acp` / `npx @anthropic/claude-agent-acp` | vendor OAuth | `ANTHROPIC_MODEL` env or session arg |
-| `Codex` | `codex-acp` / `npx @zed-industries/codex-acp` | `CODEX_API_KEY` / ChatGPT sub | codex-acp flag |
+| `Codex` | `codex-acp` / `npx @agentclientprotocol/codex-acp` | `CODEX_API_KEY` / ChatGPT sub | codex-acp flag |
 | `Gemini` | `gemini --acp` | Google OAuth | `unstable_setSessionModel` |
 | `Cursor` | `cursor-acp` | `cursor_login` | session / default model |
 | `Devin` | `devin acp` | `devin auth login` / `WINDSURF_API_KEY` | `--model` or session |
