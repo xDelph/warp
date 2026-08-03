@@ -2036,6 +2036,7 @@ define_settings_group!(AISettings, settings: [
         default: true,
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
         private: false,
         toml_path: "agents.warp_agent.other.local_acp_enabled",
         description: "Use local ACP agents instead of Warp server-side Oz.",
