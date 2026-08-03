@@ -213,12 +213,14 @@ impl HiddenComputerUseArgs {
         }
     }
 }
-const HARNESS_VALUE_VARIANTS: [Harness; 5] = [
+const HARNESS_VALUE_VARIANTS: [Harness; 7] = [
     Harness::Oz,
     Harness::Claude,
     Harness::OpenCode,
     Harness::Gemini,
     Harness::Codex,
+    Harness::Cursor,
+    Harness::Devin,
 ];
 
 /// The execution harness for an agent run.
@@ -237,10 +239,8 @@ pub enum Harness {
     /// Delegate to the `codex` CLI.
     Codex,
     /// Delegate to Cursor's ACP agent.
-    #[value(name = "cursor")]
     Cursor,
     /// Delegate to Devin's ACP agent.
-    #[value(name = "devin")]
     Devin,
     /// A harness produced by a newer client/server that this client doesn't
     /// recognize. Surfaced via deserialization fallbacks (e.g. unknown GraphQL
@@ -268,6 +268,8 @@ impl ValueEnum for Harness {
                 .help("Delegate to the `opencode` CLI"),
             Harness::Gemini => PossibleValue::new("gemini").help("Delegate to the `gemini` CLI"),
             Harness::Codex => PossibleValue::new("codex").help("Delegate to the `codex` CLI"),
+            Harness::Cursor => PossibleValue::new("cursor").help("Delegate to Cursor's ACP agent"),
+            Harness::Devin => PossibleValue::new("devin").help("Delegate to Devin's ACP agent"),
             Harness::Unknown => return None,
         };
         if !self.should_display_in_help_text() {
@@ -304,7 +306,7 @@ impl Harness {
     pub fn should_display_in_help_text(self) -> bool {
         match self {
             Self::Oz | Self::Claude | Self::Codex => true,
-            Self::OpenCode | Self::Gemini | Self::Unknown => false,
+            Self::OpenCode | Self::Gemini | Self::Cursor | Self::Devin | Self::Unknown => false,
         }
     }
 
