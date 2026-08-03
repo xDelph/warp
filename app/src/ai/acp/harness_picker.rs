@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use settings::Setting;
 use warp_cli::agent::Harness;
-use warp_core::report_if_error;
+use warp_errors::report_if_error;
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use super::{models, registry, telemetry};

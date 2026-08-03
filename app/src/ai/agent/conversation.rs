@@ -2386,7 +2386,7 @@ impl AIConversation {
     ) -> Result<(), UpdateConversationError> {
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
         if stream_id.is_local_acp() {
-            self.finalize_local_acp_stream(stream_id, terminal_view_id, ctx)?;
+            self.finalize_local_acp_stream(stream_id, terminal_surface_id, ctx)?;
         }
 
         let Some(new_exchanges) = self.added_exchanges_by_response.get(stream_id).cloned() else {
@@ -2625,7 +2625,7 @@ impl AIConversation {
 
             ctx.emit(BlocklistAIHistoryEvent::UpdatedStreamingExchange {
                 exchange_id,
-                terminal_view_id,
+                terminal_surface_id: terminal_view_id,
                 conversation_id,
                 is_hidden: self.is_exchange_hidden(exchange_id),
             });
@@ -2725,7 +2725,7 @@ impl AIConversation {
 
             ctx.emit(BlocklistAIHistoryEvent::UpdatedStreamingExchange {
                 exchange_id,
-                terminal_view_id,
+                terminal_surface_id: terminal_view_id,
                 conversation_id,
                 is_hidden,
             });

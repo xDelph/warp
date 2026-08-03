@@ -69,8 +69,8 @@ pub fn file_diff_from_old_new(
     new_full: &str,
     file_path: String,
     context: usize,
-) -> crate::ai::blocklist::inline_action::code_diff_view::FileDiff {
-    use crate::ai::blocklist::inline_action::code_diff_view::FileDiff;
+) -> crate::ai::blocklist::diff_types::FileDiff {
+    use crate::ai::blocklist::diff_types::FileDiff;
 
     const MAX_LINES_WITHOUT_WINDOWING: usize = 64;
 

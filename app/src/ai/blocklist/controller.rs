@@ -2459,7 +2459,7 @@ impl BlocklistAIController {
             &self.active_session,
             None,
             conversation_id,
-            self.terminal_view_id,
+            self.terminal_surface_id,
             ctx,
         );
 
@@ -2467,15 +2467,15 @@ impl BlocklistAIController {
             if let Err(error) = history_model.update_conversation_for_new_request_input(
                 request_input,
                 stream_id.clone(),
-                self.terminal_view_id,
+                self.terminal_surface_id,
                 ctx,
             ) {
                 log::warn!("Failed to append local ACP request: {error}");
                 return;
             }
-            history_model.mark_active_conversation_id(conversation_id, self.terminal_view_id, ctx);
+            history_model.mark_active_conversation_id(conversation_id, self.terminal_surface_id, ctx);
             history_model.update_conversation_status(
-                self.terminal_view_id,
+                self.terminal_surface_id,
                 conversation_id,
                 ConversationStatus::InProgress,
                 ctx,

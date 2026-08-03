@@ -31,8 +31,8 @@ use warpui::{
 use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::{
-    agent_view_bg_color, AgentViewController, AgentViewEntryOrigin,
-    ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE, ENTER_CLOUD_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
+    AgentViewController, AgentViewEntryOrigin,
+    ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
 };
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::conversation_navigation::ConversationNavigationData;

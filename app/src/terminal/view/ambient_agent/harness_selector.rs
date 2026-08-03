@@ -153,7 +153,7 @@ impl HarnessSelector {
             .value()
             .as_deref()
             && let Some(harness) = Harness::from_config_name(saved)
-            && HarnessAvailabilityModel::as_ref(ctx).is_harness_enabled(harness)
+            && HarnessAvailabilityModel::as_ref(ctx).is_harness_enabled(harness, ctx)
         {
             me.ambient_agent_model.update(ctx, |model, ctx| {
                 model.set_harness(harness, ctx);

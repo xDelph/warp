@@ -39,14 +39,15 @@ use warp_errors::report_if_error;
 use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::elements::{
     ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    DispatchEventResult, Element, Empty, EventHandler, Flex, MainAxisAlignment, MainAxisSize,
-    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Shrinkable, Stack,
-    Wrap, WrapFill, WrapFillEntireRun,
+    DEFAULT_UI_LINE_HEIGHT_RATIO, DispatchEventResult, Element, Empty, EventHandler, Expanded,
+    Flex, MainAxisAlignment, MainAxisSize, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Radius, Shrinkable, Stack, Text, Wrap, WrapFill, WrapFillEntireRun,
 };
 use warpui::{
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
+use warpui::scene::Border;
 
 pub(crate) use self::environment_selector::{
     EnvironmentSelector, EnvironmentSelectorEvent, EnvironmentSelectorTarget,
@@ -586,6 +587,16 @@ impl AgentInputFooter {
                 })
         });
 
+        let ftu_callout_close_button = ctx.add_typed_action_view(|_ctx| {
+            ActionButton::new("", AgentInputButtonTheme)
+                .with_icon(Icon::X)
+                .with_size(ButtonSize::AgentInputButton)
+                .with_tooltip("Dismiss")
+                .on_click(|ctx| {
+                    ctx.dispatch_typed_action(AgentInputFooterAction::DismissFtuCallout);
+                })
+        });
+
         // Toggle rich input button label when CLI input session opens/closes.
         // Also reset CLI voice state if the session ends while voice is active.
         ctx.subscribe_to_model(
@@ -1013,6 +1024,7 @@ impl AgentInputFooter {
             local_acp_model_selector,
             #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
             local_acp_openusage_summary: None,
+            ftu_callout_close_button,
             environment_selector,
             handoff_environment_selector,
             prompt_alert,
@@ -2773,6 +2785,7 @@ pub enum AgentInputFooterAction {
     OpenPluginInstallInstructionsPane,
     OpenPluginUpdateInstructionsPane,
     DismissPluginChip,
+    DismissFtuCallout,
     StartRemoteControl,
     StopRemoteControl,
     OpenCodingAgentSettings,
@@ -2957,6 +2970,9 @@ impl TypedActionView for AgentInputFooter {
                         });
                     }
                 }
+                ctx.notify();
+            }
+            AgentInputFooterAction::DismissFtuCallout => {
                 ctx.notify();
             }
             AgentInputFooterAction::StartRemoteControl => {

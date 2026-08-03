@@ -7371,7 +7371,7 @@ fn file_diffs_from_local_acp_diffs(
     diffs: &[crate::ai::agent::local_acp_tool_call::LocalAcpDiff],
     shell_launch_data: &Option<ShellLaunchData>,
     current_working_directory: &Option<String>,
-) -> Vec<crate::ai::blocklist::inline_action::code_diff_view::FileDiff> {
+) -> Vec<crate::ai::blocklist::diff_types::FileDiff> {
     use crate::ai::acp::diff_window::file_diff_from_old_new;
     use crate::ai::paths::host_native_absolute_path;
 

@@ -683,7 +683,7 @@ impl AmbientAgentViewModel {
     /// Resets to the first enabled harness if the current selection is no longer enabled.
     fn validate_selected_harness(&mut self, ctx: &mut ModelContext<Self>) {
         let model = HarnessAvailabilityModel::as_ref(ctx);
-        if !model.is_harness_enabled(self.harness)
+        if !model.is_harness_enabled(self.harness, ctx)
             && let Some(first_enabled) = model.available_harnesses().iter().find(|h| h.enabled)
         {
             self.set_harness(first_enabled.harness, ctx);

@@ -377,6 +377,7 @@ impl PromptSuggestionsView {
                     team_uid: *team_uid,
                 });
             }
+            PromptAlertEvent::OpenPrivacyPage => {}
         }
     }
 }

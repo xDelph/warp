@@ -6940,6 +6940,7 @@ impl Input {
                     user_workspaces.generate_stripe_billing_portal_link(*team_uid, ctx);
                 });
             }
+            PromptAlertEvent::OpenPrivacyPage => {}
         }
     }
 
