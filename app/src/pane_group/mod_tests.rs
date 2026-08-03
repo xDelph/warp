@@ -169,6 +169,16 @@ fn initialize_app_with_history(app: &mut App, conversations: Vec<AgentConversati
     app.add_singleton_model(NotebookKeybindings::new);
     app.add_singleton_model(TerminalKeybindings::new);
     app.add_singleton_model(move |_| BlocklistAIHistoryModel::new(vec![], vec![], &conversations));
+    // Agent views reach the local-ACP singletons during creation, mirroring
+    // the registrations done in `lib.rs` at app startup. The team model
+    // subscribes to history events; register it after the history model.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    {
+        app.add_singleton_model(crate::ai::acp::session_store::LocalAcpSessionStore::new);
+        app.add_singleton_model(crate::ai::acp::harness_picker::LocalAcpHarnessModel::new);
+        app.add_singleton_model(crate::ai::acp::submit_model::LocalAcpSubmitModel::new);
+        app.add_singleton_model(crate::ai::acp::team::LocalAcpTeamModel::new);
+    }
     // QueuedQueryModel subscribes to history events; register after the
     // history model is in place.
     app.add_singleton_model(QueuedQueryModel::new);
@@ -3975,4 +3985,71 @@ fn test_undo_close_keeps_a_file_pane_watching_its_file() {
             );
         });
     });
+}
+
+#[test]
+fn test_posix_quote_escapes_single_quotes() {
+    assert_eq!(posix_quote("/home/livio"), "'/home/livio'");
+    assert_eq!(posix_quote("it's"), r"'it'\''s'");
+}
+
+#[test]
+fn test_build_ssh_reconnect_command_plain() {
+    let command = build_ssh_reconnect_command(&RemoteSplitTarget {
+        user: "livio".into(),
+        hostname: "genesis".into(),
+        remote_cwd: Some("/home/livio/mirrors/warp".into()),
+        control_socket_path: None,
+    });
+    assert_eq!(
+        command,
+        "ssh -t 'livio@genesis' 'cd '\\''/home/livio/mirrors/warp'\\'' && exec \"$SHELL\" -l'"
+    );
+}
+
+#[test]
+fn test_build_ssh_reconnect_command_with_control_master_socket() {
+    let command = build_ssh_reconnect_command(&RemoteSplitTarget {
+        user: "livio".into(),
+        hostname: "genesis".into(),
+        remote_cwd: None,
+        control_socket_path: Some(std::path::PathBuf::from("/tmp/warp_ssh_sock")),
+    });
+    assert_eq!(
+        command,
+        "ssh -t -o ControlPath='/tmp/warp_ssh_sock' 'livio@genesis'"
+    );
+}
+
+#[test]
+fn test_build_ssh_reconnect_command_without_user() {
+    let command = build_ssh_reconnect_command(&RemoteSplitTarget {
+        user: String::new(),
+        hostname: "genesis".into(),
+        remote_cwd: None,
+        control_socket_path: None,
+    });
+    assert_eq!(command, "ssh -t 'genesis'");
+}
+
+#[test]
+fn test_build_ssh_reconnect_command_quotes_shell_metacharacters() {
+    // Hostname/user/cwd come from remote shell-integration data — they must
+    // never be able to inject extra shell words into the local command line.
+    let command = build_ssh_reconnect_command(&RemoteSplitTarget {
+        user: "user".into(),
+        hostname: "host;echo pwned".into(),
+        remote_cwd: Some("/home/user/$(touch /tmp/pwned)".into()),
+        control_socket_path: Some(std::path::PathBuf::from("/tmp/sock `id`")),
+    });
+    assert_eq!(
+        command,
+        "ssh -t -o ControlPath='/tmp/sock `id`' 'user@host;echo pwned' \
+         'cd '\\''/home/user/$(touch /tmp/pwned)'\\'' && exec \"$SHELL\" -l'"
+    );
+    // Every word built from remote data is single-quoted: the metacharacters
+    // above appear only inside quotes, never bare on the command line.
+    assert!(!command.split("ssh -t ").nth(1).unwrap().replace("'\\''", "").split('\'').step_by(2).any(|bare| {
+        [';', '$', '`', '|', '&'].iter().any(|m| bare.contains(*m))
+    }));
 }

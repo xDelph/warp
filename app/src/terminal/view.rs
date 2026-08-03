@@ -749,6 +749,19 @@ lazy_static! {
 /// Interval at which the live command duration counter repaints.
 const LIVE_COMMAND_DURATION_REPAINT_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Connection details for an active remote session, used to reconnect a
+/// newly split pane to the same SSH host and working directory.
+#[derive(Debug, Clone)]
+pub struct RemoteSplitTarget {
+    pub user: String,
+    pub hostname: String,
+    /// Remote working directory as last reported by shell integration.
+    pub remote_cwd: Option<String>,
+    /// ControlMaster socket for legacy-SSH-wrapper sessions; reusing it makes
+    /// the reconnect instant and auth-free.
+    pub control_socket_path: Option<PathBuf>,
+}
+
 #[derive(Default)]
 pub struct ControlMasterErrorBannerState {
     /// Whether or not the control master error banner is currently visible to
@@ -7969,6 +7982,57 @@ impl TerminalView {
         }
 
         Some(canonical)
+    }
+
+    /// Returns the hostname of the active session when it is attached to a
+    /// remote host (Warpified SSH or the legacy SSH wrapper). `None` for
+    /// local sessions or when the hostname is unknown.
+    pub fn active_remote_session_hostname<C: ModelAsRef>(&self, ctx: &C) -> Option<String> {
+        let session_id = self.active_block_session_id()?;
+        let session = self.sessions.as_ref(ctx).get(session_id)?;
+        if session.is_local() {
+            return None;
+        }
+        let hostname = session.hostname();
+        (!hostname.is_empty()).then(|| hostname.to_string())
+    }
+
+    /// Returns the SSH target of the active session when it is remote, so a
+    /// newly split pane can reconnect to the same host and directory.
+    /// Viewer-only surfaces (shared sessions, transcript viewers) return
+    /// `None` since they cannot be reconnected to.
+    pub fn active_remote_session_split_target<C: ModelAsRef>(
+        &self,
+        ctx: &C,
+    ) -> Option<RemoteSplitTarget> {
+        {
+            let model = self.model.lock();
+            if model.is_shared_session_viewer() || model.is_conversation_transcript_viewer() {
+                return None;
+            }
+        }
+        let session_id = self.active_block_session_id()?;
+        let session = self.sessions.as_ref(ctx).get(session_id)?;
+        if session.is_local() {
+            return None;
+        }
+        let hostname = session.hostname();
+        if hostname.is_empty() {
+            return None;
+        }
+        // The remote working directory comes from the shell-integration
+        // precmd hook / OSC 7 payloads recorded on the active block.
+        let remote_cwd = self
+            .active_block_metadata
+            .as_ref()
+            .and_then(BlockMetadata::current_working_directory)
+            .map(str::to_string);
+        Some(RemoteSplitTarget {
+            user: session.user().to_string(),
+            hostname: hostname.to_string(),
+            remote_cwd,
+            control_socket_path: session.legacy_ssh_socket_path().map(|p| p.to_path_buf()),
+        })
     }
 
     /// Starts a local ACP query when the user setting is enabled.
@@ -21876,6 +21940,17 @@ impl TerminalView {
                 terminal_view_id,
             } => {
                 if !crate::ai::local_acp::local_acp_enabled(ctx) {
+                    return;
+                }
+                // Prompts submitted in an agent-team lead conversation are
+                // dispatched to the team members instead of a single agent.
+                if crate::ai::acp::team::try_dispatch_team_prompt(
+                    prompt,
+                    *conversation_id,
+                    stream_id.clone(),
+                    *terminal_view_id,
+                    ctx,
+                ) {
                     return;
                 }
                 if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(

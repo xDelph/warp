@@ -12,11 +12,15 @@ pub enum TargetScope {
     Tab,
     Pane,
     Session,
+    Block,
     Input,
+    History,
     Settings,
     Appearance,
     Surface,
     File,
+    DriveObject,
+    Auth,
     Keybinding,
     Action,
     Capability,
@@ -40,9 +44,16 @@ pub enum ActionParameterSpec {
     BooleanValue,
     ColorValue,
     Direction,
+    DriveObjectCreate,
+    DriveObjectId,
+    DriveObjectInsert,
+    DriveObjectList,
+    DriveObjectUpdate,
     FileOpen,
+    InputMode,
     Key,
     KeyValue,
+    Limit,
     Namespace,
     PageQuery,
     Query,
@@ -53,6 +64,7 @@ pub enum ActionParameterSpec {
     TabCreate,
     Text,
     ThemeName,
+    WorkflowRun,
 }
 
 /// Typed result contract for a catalog action.
@@ -62,8 +74,13 @@ pub enum ActionResultSpec {
     Acknowledgement,
     ActiveTarget,
     AppearanceState,
+    AuthStatus,
     CapabilityList,
     CapabilityMetadata,
+    Content,
+    DriveObjectList,
+    DriveObjectMetadata,
+    FileList,
     InstanceList,
     InstanceMetadata,
     KeybindingList,
@@ -177,6 +194,11 @@ define_action_catalog! {
         AppFocus => { name: "app.focus", status: Implemented, target: Instance, params: None, result: Acknowledgement },
     }
 
+    auth {
+        AuthStatus => { name: "auth.status", status: Stub, target: Auth, params: None, result: AuthStatus },
+        AuthLogin => { name: "auth.login", status: Stub, target: Auth, params: None, result: Acknowledgement },
+    }
+
     capability {
         CapabilityList => { name: "capability.list", status: Implemented, target: Capability, params: None, result: CapabilityList },
         CapabilityInspect => { name: "capability.inspect", status: Implemented, target: Capability, params: ActionName, result: CapabilityMetadata },
@@ -226,9 +248,26 @@ define_action_catalog! {
         SessionReopenClosed => { name: "session.reopen_closed", status: Implemented, target: Session, params: None, result: Acknowledgement },
     }
 
+    block {
+        BlockList => { name: "block.list", status: Stub, target: Block, params: Limit, result: TargetList },
+        BlockInspect => { name: "block.inspect", status: Stub, target: Block, params: None, result: Content },
+        BlockOutput => { name: "block.output", status: Stub, target: Block, params: Limit, result: Content },
+    }
+
     input {
+        InputGet => { name: "input.get", status: Stub, target: Input, params: None, result: Content },
         InputInsert => { name: "input.insert", status: Implemented, target: Input, params: Text, result: Acknowledgement },
         InputReplace => { name: "input.replace", status: Implemented, target: Input, params: Text, result: Acknowledgement },
+        InputClear => { name: "input.clear", status: Stub, target: Input, params: None, result: Acknowledgement },
+        InputModeSet => { name: "input.mode.set", status: Stub, target: Input, params: InputMode, result: Acknowledgement },
+        // Fork note: `input.run` is opened up to external (same-UID, loopback)
+        // clients so agents in sibling panes can deliver prompts to each
+        // other, cmux-style. The outside-Warp settings toggle still gates it.
+        InputRun => { name: "input.run", status: Stub, target: Input, params: Text, result: Acknowledgement },
+    }
+
+    history {
+        HistoryList => { name: "history.list", status: Stub, target: History, params: Limit, result: Content },
     }
 
     theme {
@@ -291,6 +330,22 @@ define_action_catalog! {
     }
 
     file {
+        FileList => { name: "file.list", status: Stub, target: File, params: None, result: FileList },
         FileOpen => { name: "file.open", status: Implemented, target: File, params: FileOpen, result: Acknowledgement },
+    }
+
+    drive {
+        DriveList => { name: "drive.list", status: Stub, target: DriveObject, params: DriveObjectList, result: DriveObjectList },
+        DriveInspect => { name: "drive.inspect", status: Stub, target: DriveObject, params: DriveObjectId, result: DriveObjectMetadata },
+        DriveOpen => { name: "drive.open", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveNotebookOpen => { name: "drive.notebook.open", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveEnvVarCollectionOpen => { name: "drive.env_var_collection.open", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveObjectShareOpen => { name: "drive.object.share.open", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveObjectCreate => { name: "drive.object.create", status: Stub, target: DriveObject, params: DriveObjectCreate, result: Acknowledgement },
+        DriveObjectUpdate => { name: "drive.object.update", status: Stub, target: DriveObject, params: DriveObjectUpdate, result: Acknowledgement },
+        DriveObjectDelete => { name: "drive.object.delete", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveObjectInsert => { name: "drive.object.insert", status: Stub, target: DriveObject, params: DriveObjectInsert, result: Acknowledgement },
+        DriveObjectShareToTeam => { name: "drive.object.share_to_team", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
+        DriveWorkflowRun => { name: "drive.workflow.run", status: Stub, target: DriveObject, params: WorkflowRun, result: Acknowledgement },
     }
 }

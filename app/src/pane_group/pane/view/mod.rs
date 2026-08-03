@@ -8,6 +8,8 @@ pub use header_content::{
     HeaderContent, HeaderRenderContext, StandardHeader, StandardHeaderOptions,
 };
 use pathfinder_geometry::rect::RectF;
+use warp_core::ui::color::hex_color::coloru_from_hex_string;
+use warpui::color::ColorU;
 use warpui::elements::{
     Border, ConstrainedBox, Container, DropTarget, DropTargetData, Flex, MainAxisSize,
     ParentElement, SavePosition, Shrinkable,
@@ -27,7 +29,7 @@ use crate::pane_group::focus_state::{PaneFocusHandle, PaneGroupFocusEvent};
 use crate::pane_group::pane::ActionOrigin;
 use crate::pane_group::{Direction, SplitPaneState, TabBarHoverIndex};
 use crate::server::telemetry::SharingDialogSource;
-use crate::settings::{PaneSettings, PaneSettingsChangedEvent};
+use crate::settings::{PaneSettings, PaneSettingsChangedEvent, SshSettings};
 use crate::util::bindings::CustomAction;
 
 const HAS_SHARED_OBJECT_CONTEXT_KEY: &str = "PaneView_HasSharedObject";
@@ -417,6 +419,18 @@ impl<P: BackingView> View for PaneView<P> {
         column.add_child(Shrinkable::new(1., ChildView::new(&active_child).finish()).finish());
 
         let mut container = Container::new(column.finish());
+
+        // Per-host pane background: tint panes whose active session is on a
+        // remote host so each SSH destination is visually distinguishable.
+        if let Some(remote_host) = active_child.as_ref(app).remote_host_for_background(app) {
+            let background = ssh_host_background_color(
+                &remote_host,
+                appearance.theme().background().into_solid(),
+                app,
+            );
+            container = container.with_background_color(background);
+        }
+
         if pane_configuration.show_accent_border {
             let border = Border::all(2.).with_border_fill(appearance.theme().accent());
             container = container.with_border(border);
@@ -486,5 +500,71 @@ impl<P: BackingView> TypedActionView for PaneView<P> {
 impl DropTargetData for PaneDropTargetData {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// Resolves the background color for a pane whose active session is attached
+/// to `host`. An explicit entry in the `ssh_host_colors` setting wins;
+/// otherwise a deterministic low-saturation hue derived from the hostname is
+/// blended into the theme background.
+fn ssh_host_background_color(host: &str, theme_background: ColorU, app: &AppContext) -> ColorU {
+    if let Some(color) = SshSettings::as_ref(app)
+        .ssh_host_colors
+        .get(host)
+        .and_then(|hex| coloru_from_hex_string(hex).ok())
+    {
+        return color;
+    }
+
+    mix_coloru(
+        theme_background,
+        hash_hue_color(host, theme_background),
+        0.2,
+    )
+}
+
+/// Deterministic per-host tint: hue from `hash(host)`, lightness kept close
+/// to the theme background so glyph contrast is preserved in both light and
+/// dark themes.
+fn hash_hue_color(host: &str, theme_background: ColorU) -> ColorU {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    host.hash(&mut hasher);
+    let hue = (hasher.finish() % 360) as f32;
+    let luma = (0.299 * theme_background.r as f32
+        + 0.587 * theme_background.g as f32
+        + 0.114 * theme_background.b as f32)
+        / 255.0;
+    hsl_to_coloru(hue, 0.45, luma.clamp(0.12, 0.88))
+}
+
+fn hsl_to_coloru(hue: f32, saturation: f32, lightness: f32) -> ColorU {
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let hue_sector = hue / 60.0;
+    let x = chroma * (1.0 - (hue_sector % 2.0 - 1.0).abs());
+    let (r, g, b) = match hue_sector as u32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let m = lightness - chroma / 2.0;
+    ColorU {
+        r: ((r + m) * 255.0).round() as u8,
+        g: ((g + m) * 255.0).round() as u8,
+        b: ((b + m) * 255.0).round() as u8,
+        a: 255,
+    }
+}
+
+fn mix_coloru(a: ColorU, b: ColorU, t: f32) -> ColorU {
+    let lerp = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    ColorU {
+        r: lerp(a.r, b.r),
+        g: lerp(a.g, b.g),
+        b: lerp(a.b, b.b),
+        a: 255,
     }
 }

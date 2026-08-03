@@ -1659,7 +1659,7 @@ fn native_shell_suggestion_results(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DenyExecutionReason {
+pub(crate) enum DenyExecutionReason {
     /// Can't execute command because shell bootstrapping is still underway; shell isn't ready to
     /// execute user-supplied commands yet.
     NotBootstrapped,
@@ -1686,7 +1686,7 @@ impl DenyExecutionReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CanExecuteCommand {
+pub(crate) enum CanExecuteCommand {
     Yes,
     No(DenyExecutionReason),
 }
@@ -7516,7 +7516,7 @@ impl Input {
     ///    acknowledge the command in the session's history. Except when viewing
     ///    a shared session, since those sessions aren't registered in the [`History`]
     ///    model.
-    fn can_execute_command(&self, ctx: &AppContext) -> CanExecuteCommand {
+    pub(crate) fn can_execute_command(&self, ctx: &AppContext) -> CanExecuteCommand {
         let model = self.model.lock();
         let active_block = model.block_list().active_block();
 
@@ -15329,6 +15329,20 @@ impl Input {
 
         if ensure_input_is_focused {
             self.focus_input_box(ctx);
+        }
+
+        // Warm the selected local ACP agent while the user types their prompt,
+        // so the first submission doesn't pay the agent cold-boot handshake.
+        #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+        if crate::ai::local_acp::local_acp_enabled(ctx) {
+            let cwd = self
+                .model
+                .lock()
+                .session_startup_path()
+                .unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+            crate::ai::acp::submit::prewarm_selected_local_acp_agent(cwd, ctx);
         }
     }
 

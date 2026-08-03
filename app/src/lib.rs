@@ -2253,6 +2253,7 @@ pub(crate) fn initialize_app(
         ctx.add_singleton_model(ai::acp::session_store::LocalAcpSessionStore::new);
         ctx.add_singleton_model(ai::acp::harness_picker::LocalAcpHarnessModel::new);
         ctx.add_singleton_model(ai::acp::submit_model::LocalAcpSubmitModel::new);
+        ctx.add_singleton_model(ai::acp::team::LocalAcpTeamModel::new);
     }
     ctx.add_singleton_model(
         ai::blocklist::orchestration_event_streamer::OrchestrationEventStreamer::new,

@@ -16,10 +16,10 @@ use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::{instance_selector, target_selector};
 use crate::local_control::{
     ActionCatalogCommand, AppCommand, AppearanceCommand, CapabilityCommand, FileCommand,
-    InputCommand, InstanceCommand, KeybindingCommand, PaneCommand, SessionCommand, SettingCommand,
-    SurfaceCommand, SurfaceOpenCommand, SurfaceOpenToggleCommand, SurfaceQueryCommand,
-    SurfaceSettingsCommand, SurfaceToggleCommand, TabActivateArgs, TabCloseArgs, TabColorCommand,
-    TabCommand, TargetArgs, ThemeCommand, WindowCommand,
+    InputCommand, InstanceCommand, KeybindingCommand, PaneCommand, PaneReadArgs, PaneTextArgs,
+    SessionCommand, SettingCommand, SurfaceCommand, SurfaceOpenCommand, SurfaceOpenToggleCommand,
+    SurfaceQueryCommand, SurfaceSettingsCommand, SurfaceToggleCommand, TabActivateArgs,
+    TabCloseArgs, TabColorCommand, TabCommand, TargetArgs, ThemeCommand, WindowCommand,
 };
 
 pub(super) fn run_surface_command(
@@ -153,9 +153,69 @@ fn render_human_readable(action: ActionKind, data: &serde_json::Value) -> String
             nested_value_or_unknown(data, &["tab", "active_index"]),
             nested_value_or_unknown(data, &["tab", "count"])
         ),
+        ActionKind::TabList => data
+            .get("tabs")
+            .and_then(serde_json::Value::as_array)
+            .map(|tabs| {
+                tabs.iter()
+                    .map(|tab| {
+                        format!(
+                            "tab:{}\tid={}\t{}{}",
+                            nested_value_or_unknown(tab, &["index"]),
+                            nested_value_or_unknown(tab, &["id"]),
+                            nested_value_or_unknown(tab, &["title"]),
+                            if tab.get("is_active") == Some(&serde_json::Value::Bool(true)) {
+                                "\t[active]"
+                            } else {
+                                ""
+                            }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_else(|| data.to_string()),
+        ActionKind::PaneList => data
+            .get("panes")
+            .and_then(serde_json::Value::as_array)
+            .map(|panes| {
+                panes
+                    .iter()
+                    .map(|pane| {
+                        let host = nested_value_or_unknown(pane, &["remote_hostname"]);
+                        format!(
+                            "pane={}\t{}{}{}",
+                            nested_value_or_unknown(pane, &["pane_uuid"]),
+                            nested_value_or_unknown(pane, &["title"]),
+                            if host == "<unknown>" {
+                                String::new()
+                            } else {
+                                format!("\thost={host}")
+                            },
+                            if pane.get("is_focused") == Some(&serde_json::Value::Bool(true)) {
+                                "\t[focused]"
+                            } else {
+                                ""
+                            }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_else(|| data.to_string()),
+        ActionKind::BlockOutput => value_or_unknown(data, "text"),
         ActionKind::PaneSplit => format!(
             "Split created pane {}",
             nested_value_or_unknown(data, &["pane", "id"])
+        ),
+        ActionKind::InputInsert | ActionKind::InputRun => format!(
+            "Delivered to pane {}",
+            value_or_unknown(data, "pane_uuid")
+        ),
+        ActionKind::TabRename => format!(
+            "Renamed tab {} to {:?}",
+            nested_value_or_unknown(data, &["tab", "index"]),
+            nested_value_or_unknown(data, &["tab", "title"])
         ),
         _ => serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string()),
     }
@@ -479,6 +539,28 @@ pub(super) fn run_pane_command(
             output_format,
         ),
         PaneCommand::ResetName(args) => run_action(args, ActionKind::PaneResetName, output_format),
+        PaneCommand::Read(args) => run_action_with_params(
+            args.target,
+            ActionKind::BlockOutput,
+            LimitParams { limit: args.lines },
+            output_format,
+        ),
+        PaneCommand::Send(args) => run_action_with_params(
+            args.target,
+            ActionKind::InputInsert,
+            TextParams {
+                text: args.text.join(" "),
+            },
+            output_format,
+        ),
+        PaneCommand::Run(args) => run_action_with_params(
+            args.target,
+            ActionKind::InputRun,
+            TextParams {
+                text: args.text.join(" "),
+            },
+            output_format,
+        ),
     }
 }
 
@@ -797,4 +879,10 @@ fn run_action_with_params<T: Serialize>(
 
 fn parse_json_value_or_string(value: String) -> serde_json::Value {
     serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value))
+}
+
+/// Serializable limit parameter for actions like `block.output`.
+#[derive(Serialize)]
+struct LimitParams {
+    limit: Option<u32>,
 }

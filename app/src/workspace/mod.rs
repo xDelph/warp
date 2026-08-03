@@ -1338,6 +1338,19 @@ pub fn init(app: &mut AppContext) {
         .with_custom_action(CustomAction::NewAgentModePane),
     ]);
 
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    app.register_editable_bindings([EditableBinding::new(
+        "workspace:new_agent_team",
+        "New Agent Team",
+        WorkspaceAction::NewAgentTeam {
+            teammates: 2,
+            remote_host: None,
+        },
+    )
+    .with_enabled(|| FeatureFlag::AgentMode.is_enabled())
+    .with_context_predicate(id!("Workspace") & id!(flags::IS_ANY_AI_ENABLED))
+    .with_group(bindings::BindingGroup::WarpAi.as_str())]);
+
     app.register_editable_bindings([
         EditableBinding::new(
             "workspace:create_team_env_vars",

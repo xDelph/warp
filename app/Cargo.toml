@@ -514,6 +514,7 @@ factory_mcp = []
 rmux_native_pane = ["dep:rmux-sdk"]
 default = [
     "local_acp",
+    "warp_control_cli",
     "agent_mode",
     "osc_hyperlinks",
     "viewing_shared_sessions",

@@ -116,7 +116,7 @@ use crate::server::telemetry::{
     AnonymousUserSignupEntrypoint, PaletteSource, SharingDialogSource, TelemetryEvent,
 };
 use crate::session_management::SessionNavigationData;
-use crate::settings::{AISettings, DefaultSessionMode, PaneSettings};
+use crate::settings::{AISettings, DefaultSessionMode, PaneSettings, SshSettings};
 use crate::settings_view::SettingsSection;
 use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
 use crate::shell_indicator::ShellIndicatorType;
@@ -152,7 +152,7 @@ use crate::terminal::view::load_ai_conversation::{
 use crate::terminal::view::ssh_file_upload::FileUploadId;
 use crate::terminal::view::{
     BlockNotification, ConversationRestorationInNewPaneType, ExecuteCommandEvent,
-    LeftPanelTargetView, SyncEvent, TerminalViewState,
+    LeftPanelTargetView, RemoteSplitTarget, SyncEvent, TerminalViewState,
 };
 use crate::terminal::{
     MockTerminalManager, ShareBlockModal, ShareBlockModalEvent, ShellLaunchData, ShellLaunchState,
@@ -174,12 +174,15 @@ use crate::workspace::{
 use crate::workspaces::user_workspaces::{ResolvedTeamScope, UserWorkspaces};
 use crate::{cmd_or_ctrl_shift, send_telemetry_from_ctx};
 
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+mod agent_team;
 mod ambient_pane_restoration;
 mod child_agent;
 pub(crate) use child_agent::materialization::{
     ChildPaneMaterialization, decide_child_pane_materialization,
 };
 pub mod focus_state;
+pub mod local_control;
 pub mod pane;
 pub mod tree;
 pub mod working_directories;
@@ -6725,15 +6728,43 @@ impl PaneGroup {
                     )
             })
         });
-        self.add_session_in_directory(
+
+        // When the base pane's active session is remote, reconnect the new
+        // pane to the same host and directory (wezterm-style SSH domains).
+        // Skipped when restoring a conversation or launching a specific shell.
+        let ssh_inherit_command = if conversation_restoration.is_none() && chosen_shell.is_none() {
+            self.ssh_inherit_command_for_split(base_pane_id_for_context, ctx)
+        } else {
+            None
+        };
+
+        self.add_session_in_directory_with_pending_command(
             direction,
             base_pane_id_for_split,
             chosen_shell,
             startup_directory,
             conversation_restoration,
             default_session_mode_behavior,
+            ssh_inherit_command,
             ctx,
         )
+    }
+
+    /// Builds the command a freshly split pane runs to reconnect to the SSH
+    /// host of the pane it was split from. `None` when the base pane's active
+    /// session is local or `inherit_ssh_on_split` is disabled.
+    fn ssh_inherit_command_for_split(
+        &self,
+        base_pane_id: Option<TerminalPaneId>,
+        ctx: &AppContext,
+    ) -> Option<String> {
+        if !*SshSettings::as_ref(ctx).inherit_ssh_on_split {
+            return None;
+        }
+        let target = self
+            .terminal_view_from_pane_id(base_pane_id?, ctx)?
+            .read(ctx, |view, _| view.active_remote_session_split_target(ctx))?;
+        Some(build_ssh_reconnect_command(&target))
     }
 
     /// Creates the `TerminalView`/`TerminalManager` pair for an RMUX-backed
@@ -6879,6 +6910,30 @@ impl PaneGroup {
         default_session_mode_behavior: DefaultSessionModeBehavior,
         ctx: &mut ViewContext<Self>,
     ) -> TerminalPaneId {
+        self.add_session_in_directory_with_pending_command(
+            direction,
+            base_pane_id,
+            chosen_shell,
+            startup_directory,
+            conversation_restoration,
+            default_session_mode_behavior,
+            None,
+            ctx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_session_in_directory_with_pending_command(
+        &mut self,
+        direction: Direction,
+        base_pane_id: Option<PaneId>,
+        chosen_shell: Option<AvailableShell>,
+        startup_directory: Option<PathBuf>,
+        conversation_restoration: Option<ConversationRestorationInNewPaneType>,
+        default_session_mode_behavior: DefaultSessionModeBehavior,
+        pending_command: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) -> TerminalPaneId {
         let should_immediately_enter_agent_view = matches!(
             default_session_mode_behavior,
             DefaultSessionModeBehavior::Apply
@@ -6897,15 +6952,30 @@ impl PaneGroup {
 
         let _ = self.add_pane(direction, base_pane_id, Box::new(pane_data), true, ctx);
 
+        let has_pending_command = pending_command.is_some();
+        if let Some(command) = pending_command {
+            view.update(ctx, |terminal_view, ctx| {
+                terminal_view.set_pending_command_queue(vec![command], ctx);
+            });
+        }
+
         // Enter agent view if default session mode is Agent and AI is enabled
         if should_immediately_enter_agent_view {
-            view.update(ctx, |terminal_view, ctx| {
-                terminal_view.enter_agent_view_for_new_conversation(
-                    None,
-                    AgentViewEntryOrigin::DefaultSessionMode,
-                    ctx,
-                );
-            });
+            if has_pending_command {
+                // Defer agent view entry until the pending command (e.g. SSH
+                // reconnect) has run in terminal mode.
+                view.update(ctx, |terminal_view, _| {
+                    terminal_view.set_enter_agent_view_after_pending_commands();
+                });
+            } else {
+                view.update(ctx, |terminal_view, ctx| {
+                    terminal_view.enter_agent_view_for_new_conversation(
+                        None,
+                        AgentViewEntryOrigin::DefaultSessionMode,
+                        ctx,
+                    );
+                });
+            }
         }
 
         new_pane_id
@@ -8580,4 +8650,42 @@ impl View for PaneGroup {
         _ctx: &mut ViewContext<Self>,
     ) {
     }
+}
+
+/// Quotes `s` as a single POSIX shell word.
+fn posix_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// Builds the `ssh` command a split pane runs to land on the same remote
+/// host and directory as the pane it was split from. Reuses the base
+/// session's ControlMaster socket when one exists so the connection is
+/// instant and auth-free.
+fn build_ssh_reconnect_command(target: &RemoteSplitTarget) -> String {
+    // The destination is built from shell-integration data reported by the
+    // remote host — quote it so a hostile or malformed hostname/user can't
+    // inject extra shell words.
+    let destination = if target.user.is_empty() {
+        posix_quote(&target.hostname)
+    } else {
+        posix_quote(&format!("{}@{}", target.user, target.hostname))
+    };
+
+    let mut command = String::from("ssh -t");
+    if let Some(socket_path) = &target.control_socket_path {
+        command.push_str(" -o ControlPath=");
+        command.push_str(&posix_quote(&socket_path.display().to_string()));
+    }
+    command.push(' ');
+    command.push_str(&destination);
+
+    if let Some(cwd) = &target.remote_cwd {
+        // `cd` into the inherited directory, then hand over to a login shell.
+        // `$SHELL` is single-quoted so it expands on the remote side.
+        let remote_command = format!("cd {} && exec \"$SHELL\" -l", posix_quote(cwd));
+        command.push(' ');
+        command.push_str(&posix_quote(&remote_command));
+    }
+
+    command
 }

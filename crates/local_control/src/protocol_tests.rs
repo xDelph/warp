@@ -96,6 +96,12 @@ fn response_error_serializes_machine_code() {
 }
 
 #[test]
+fn ambiguous_target_error_code_is_stable() {
+    let value = serde_json::to_value(ErrorCode::AmbiguousTarget).expect("code serializes");
+    assert_eq!(value, serde_json::json!("ambiguous_target"));
+}
+
+#[test]
 fn surface_list_result_serializes_stable_availability_shape() {
     let result = SurfaceListResult {
         surfaces: vec![
@@ -134,37 +140,19 @@ fn surface_list_result_serializes_stable_availability_shape() {
 fn malformed_and_removed_action_names_are_not_deserialized() {
     for action in [
         "tab.create.extra",
-        "auth.status",
-        "auth.login",
-        "block.list",
-        "block.inspect",
-        "block.output",
-        "history.list",
-        "file.list",
-        "input.get",
-        "input.clear",
-        "input.mode.set",
-        "input.run",
-        "drive.list",
-        "drive.inspect",
-        "drive.open",
-        "drive.notebook.open",
-        "drive.env_var_collection.open",
-        "drive.object.share.open",
-        "drive.object.create",
-        "drive.object.update",
-        "drive.object.delete",
-        "drive.object.insert",
-        "drive.object.share_to_team",
-        "drive.workflow.run",
+        "file.write",
+        "file.delete",
+        "auth.api_key.set",
+        "auth.api_key.status",
+        "auth.api_key.revoke",
     ] {
         assert!(serde_json::from_value::<ActionKind>(serde_json::json!(action)).is_err());
     }
 }
 
 #[test]
-fn catalog_has_exactly_84_retained_actions() {
-    assert_eq!(ActionKind::ALL.len(), 84);
+fn catalog_has_exactly_107_retained_actions() {
+    assert_eq!(ActionKind::ALL.len(), 107);
 }
 
 #[test]
@@ -205,23 +193,28 @@ fn direct_surface_actions_have_stable_names() {
 }
 
 #[test]
-fn catalog_actions_share_uniform_authorization() {
+fn catalog_metadata_status_matches_implementation_flag() {
     for kind in ActionKind::ALL {
         let metadata = kind.metadata();
         assert_eq!(
-            metadata.implementation_status,
-            ActionImplementationStatus::Implemented,
-            "{} should be implemented",
+            metadata.implementation_status == ActionImplementationStatus::Implemented,
+            kind.is_implemented(),
+            "{} metadata status should match is_implemented",
             metadata.name,
         );
     }
 }
 
 #[test]
-fn implemented_catalog_contains_all_retained_actions() {
-    let actions = ActionKind::implemented_metadata()
+fn implemented_catalog_contains_all_implemented_actions() {
+    let implemented = ActionKind::implemented_metadata()
         .into_iter()
         .map(|metadata| metadata.kind)
         .collect::<Vec<_>>();
-    assert_eq!(actions, ActionKind::ALL);
+    let expected = ActionKind::ALL
+        .iter()
+        .copied()
+        .filter(|kind| kind.is_implemented())
+        .collect::<Vec<_>>();
+    assert_eq!(implemented, expected);
 }

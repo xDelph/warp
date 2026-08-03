@@ -163,6 +163,15 @@ pub(crate) fn initialize_app(app: &mut App) {
     app.add_singleton_model(SessionPermissionsManager::new);
     app.add_singleton_model(LLMPreferences::new);
     app.add_singleton_model(HarnessAvailabilityModel::new);
+    // Terminal views reach the local-ACP singletons during creation, mirroring
+    // the registrations done in `lib.rs` at app startup.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    {
+        app.add_singleton_model(crate::ai::acp::session_store::LocalAcpSessionStore::new);
+        app.add_singleton_model(crate::ai::acp::harness_picker::LocalAcpHarnessModel::new);
+        app.add_singleton_model(crate::ai::acp::submit_model::LocalAcpSubmitModel::new);
+        app.add_singleton_model(crate::ai::acp::team::LocalAcpTeamModel::new);
+    }
     app.add_singleton_model(|ctx| AITipModel::new_for_agent_tips(ctx));
     app.add_singleton_model(|_| SettingsPaneManager::new());
     app.add_singleton_model(|_| AIFactManager::new());

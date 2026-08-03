@@ -315,7 +315,7 @@ impl Harness {
             Self::Oz => "Warp Agent",
             Self::Claude => "Claude Code",
             Self::OpenCode => "OpenCode",
-            Self::Gemini => "Gemini CLI",
+            Self::Gemini => "Antigravity",
             Self::Codex => "Codex",
             Self::Cursor => "Cursor",
             Self::Devin => "Devin",

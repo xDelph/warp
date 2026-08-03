@@ -5511,7 +5511,12 @@ impl Workspace {
         ctx.windows().set_window_title(window_id, &window_title);
     }
 
-    fn rename_tab_internal(&mut self, index: usize, title: &str, ctx: &mut ViewContext<Self>) {
+    pub(crate) fn rename_tab_internal(
+        &mut self,
+        index: usize,
+        title: &str,
+        ctx: &mut ViewContext<Self>,
+    ) {
         // Focusing on the clicked tab
         if index >= self.tab_count() {
             return;
@@ -24926,6 +24931,17 @@ impl TypedActionView for Workspace {
                 );
 
                 self.add_terminal_pane_in_ai_mode(*zero_state_prompt_suggestion_type, ctx);
+            }
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            NewAgentTeam {
+                teammates,
+                remote_host,
+            } => {
+                let teammates = *teammates;
+                let remote_host = remote_host.clone();
+                self.active_tab_pane_group().clone().update(ctx, |pane_group, ctx| {
+                    pane_group.create_local_acp_agent_team(teammates, remote_host, ctx);
+                });
             }
             OpenCloudAgentSetupGuide => {
                 if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)

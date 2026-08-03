@@ -349,6 +349,16 @@ pub enum PaneCommand {
 
     /// Reset a pane name.
     ResetName(TargetArgs),
+
+    /// Read a pane's screen (alt-screen TUI content or recent blocks).
+    Read(PaneReadArgs),
+
+    /// Stage text in a pane's input editor without executing it.
+    Send(PaneTextArgs),
+
+    /// Deliver text plus Enter directly to a pane's PTY (reaches shells
+    /// and fullscreen TUI agents alike).
+    Run(PaneTextArgs),
 }
 
 /// Commands that inspect local Warp sessions.
@@ -682,6 +692,28 @@ pub struct PaneResizeArgs {
 
     #[arg(long = "amount")]
     pub amount: Option<u32>,
+}
+
+/// Arguments for `pane read`.
+#[derive(Debug, Clone, Args)]
+pub struct PaneReadArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Maximum number of screen lines to return.
+    #[arg(long = "lines")]
+    pub lines: Option<u32>,
+}
+
+/// Arguments for `pane send` and `pane run`.
+#[derive(Debug, Clone, Args)]
+pub struct PaneTextArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Text to deliver to the pane.
+    #[arg(required = true, trailing_var_arg = true)]
+    pub text: Vec<String>,
 }
 
 #[derive(Debug, Clone, Args)]

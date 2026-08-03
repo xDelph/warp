@@ -615,6 +615,10 @@ impl BackingView for TerminalView {
     type CustomAction = TerminalAction;
     type AssociatedData = ModelHandle<Box<dyn TerminalManager>>;
 
+    fn remote_host_for_background(&self, app: &AppContext) -> Option<String> {
+        self.active_remote_session_hostname(app)
+    }
+
     fn set_pane_stack(
         &mut self,
         pane_stack: WeakModelHandle<PaneStack<Self>>,

@@ -208,7 +208,13 @@ impl Connection {
         }
 
         if let Some(io_task) = io_task {
-            let _ = io_task.await;
+            // Never block shutdown on stdio EOF: agents launched through a
+            // shim chain (e.g. codex-acp's bun symlink → `npm exec` → node →
+            // platform binary) leave grandchildren holding the pipes after
+            // the direct child dies, so the IO task may never see EOF.
+            // Dropping the receiver detaches it; the reader is torn down with
+            // its runtime.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), io_task).await;
         }
 
         Ok(())
@@ -264,6 +270,16 @@ impl Connection {
     ) -> Result<acp::SetSessionConfigOptionResponse> {
         self.connection()?
             .set_session_config_option(args)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub(crate) async fn set_session_model(
+        &self,
+        args: acp::SetSessionModelRequest,
+    ) -> Result<acp::SetSessionModelResponse> {
+        self.connection()?
+            .set_session_model(args)
             .await
             .map_err(Error::from)
     }

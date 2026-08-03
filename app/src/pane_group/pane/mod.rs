@@ -1065,6 +1065,13 @@ pub trait BackingView: View {
         true
     }
 
+    /// Hostname of the view's active remote session, when its contents are
+    /// attached to a remote host. Drives per-host pane background tinting;
+    /// `None` keeps the theme background.
+    fn remote_host_for_background(&self, _app: &AppContext) -> Option<String> {
+        None
+    }
+
     /// Called when this view is added to a [`PaneStack`]. Views are given a handle to their owning stack so that they can:
     /// * Check if they're part of a stack
     /// * Push/pop views from the stack

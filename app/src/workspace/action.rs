@@ -531,6 +531,15 @@ pub enum WorkspaceAction {
         /// The type of zero state prompt suggestion to start with (optional).
         zero_state_prompt_suggestion_type: Option<ZeroStatePromptSuggestionType>,
     },
+    /// Create a local-ACP agent team: the focused pane hosts the lead
+    /// conversation and `teammates` split panes each host a child agent
+    /// conversation on the selected harness. When `remote_host` is set,
+    /// teammates run over SSH on that host (e.g. "genesis", "exodus").
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    NewAgentTeam {
+        teammates: usize,
+        remote_host: Option<String>,
+    },
     OpenCloudAgentSetupGuide,
     AttemptLoginGatedAIUpgrade,
     /// Open the modal explaining Prompt Suggestions aren't available on the Free plan.
@@ -1257,6 +1266,9 @@ impl WorkspaceAction {
             #[cfg(feature = "local_fs")]
             FileDeleted { .. } => false, // File deletion doesn't change workspace state
             OpenEnvironmentManagementPane => false,
+            // Creating an agent team changes the pane layout, so save state.
+            #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+            NewAgentTeam { .. } => true,
             #[cfg(target_os = "linux")]
             DismissWaylandCrashRecoveryBannerAndOpenLink => false,
             #[cfg(target_family = "wasm")]

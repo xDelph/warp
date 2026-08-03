@@ -32,7 +32,7 @@ publish = false
 ai = { path = "crates/ai" }
 ai_types = { path = "crates/ai_types" }
 acpx = "0.1.0"
-agent-client-protocol = "0.10.2"
+agent-client-protocol = { version = "0.10.2", features = ["unstable_session_model"] }
 app-installation-detection = { path = "crates/app-installation-detection" }
 asset_cache = { path = "crates/asset_cache" }
 asset_macro = { path = "crates/asset_macro" }

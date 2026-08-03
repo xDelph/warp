@@ -2428,9 +2428,8 @@ impl BlocklistAIController {
     ) -> Option<(AIConversationId, ResponseStreamId)> {
         let selected_conversation_id = self.context_model.as_ref(ctx).selected_conversation_id(ctx);
 
-        let history_model = BlocklistAIHistoryModel::handle(ctx);
         let (conversation_id, task_id) = if let Some(conversation_id) = selected_conversation_id {
-            let Some(task_id) = history_model
+            let Some(task_id) = BlocklistAIHistoryModel::handle(ctx)
                 .as_ref(ctx)
                 .conversation(&conversation_id)
                 .map(|conversation| conversation.get_root_task_id().clone())
@@ -2444,6 +2443,39 @@ impl BlocklistAIController {
             (conversation.id(), conversation.get_root_task_id().clone())
         };
 
+        self.start_local_acp_request_with_task(prompt, conversation_id, task_id, ctx)
+    }
+
+    /// Appends `prompt` as a user query to an explicit conversation (instead
+    /// of the selected one) and opens a response stream for it. Used by agent
+    /// teams to record dispatched prompts in member conversations.
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    pub fn start_local_acp_request_in_conversation(
+        &mut self,
+        prompt: String,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) -> Option<(AIConversationId, ResponseStreamId)> {
+        let Some(task_id) = BlocklistAIHistoryModel::handle(ctx)
+            .as_ref(ctx)
+            .conversation(&conversation_id)
+            .map(|conversation| conversation.get_root_task_id().clone())
+        else {
+            log::warn!("Local ACP target conversation {conversation_id} was not found");
+            return None;
+        };
+        self.start_local_acp_request_with_task(prompt, conversation_id, task_id, ctx)
+    }
+
+    #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+    fn start_local_acp_request_with_task(
+        &mut self,
+        prompt: String,
+        conversation_id: AIConversationId,
+        task_id: TaskId,
+        ctx: &mut ModelContext<Self>,
+    ) -> Option<(AIConversationId, ResponseStreamId)> {
+        let history_model = BlocklistAIHistoryModel::handle(ctx);
         let stream_id = ResponseStreamId::new_local();
         let request_input = RequestInput::for_task(
             vec![AIAgentInput::UserQuery {

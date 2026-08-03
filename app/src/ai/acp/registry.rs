@@ -26,28 +26,32 @@ pub(crate) fn agent_specs() -> &'static [LocalAcpAgentSpec] {
             harness: Harness::Codex,
             command: "codex-acp",
             args: &[],
-            install_url: "https://github.com/zed-industries/codex-acp",
+            install_url: "https://github.com/agentclientprotocol/codex-acp",
             default_models: &[],
             supports_resume: true,
         },
+        // Gemini CLI was retired 2026-06-18; the Gemini harness slot now runs
+        // Google's Antigravity CLI (`agy`) through the `antigravity-acp`
+        // adapter (`bun install -g antigravity-acp`), which exposes models via
+        // `config_option_update` session updates. Auth is handled by `agy`
+        // itself (Google OAuth via `agy login`).
         LocalAcpAgentSpec {
             harness: Harness::Gemini,
-            command: "gemini",
-            args: &["--acp"],
-            install_url: "https://geminicli.com/docs/cli/acp-mode/",
-            // Gemini exposes models via `unstable_setSessionModel`, not config_options.
-            default_models: &[
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-            ],
-            supports_resume: false,
+            command: "agy-acp",
+            args: &[],
+            install_url: "https://github.com/shubzkothekar/antigravity-acp",
+            default_models: &[],
+            supports_resume: true,
         },
+        // Cursor's official CLI speaks ACP natively (`cursor-agent acp`) and
+        // reports models via the session `models` field rather than
+        // config options. The third-party `cursor-acp` adapter is no longer
+        // used.
         LocalAcpAgentSpec {
             harness: Harness::Cursor,
-            command: "cursor-acp",
-            args: &[],
-            install_url: "https://github.com/raphaelluethy/cursor-acp",
+            command: "cursor-agent",
+            args: &["acp"],
+            install_url: "https://cursor.com/docs/cli",
             default_models: &[],
             supports_resume: true,
         },
@@ -83,9 +87,13 @@ pub(crate) fn should_auto_authenticate(harness: Harness) -> bool {
         // Codex ACP reads ChatGPT login state / CODEX_API_KEY / OPENAI_API_KEY itself.
         // Calling authenticate() can trigger unsupported interactive flows.
         Harness::Codex => false,
-        // Gemini ACP must be driven by GEMINI_API_KEY. Browser login is no longer
-        // supported for this path, so never call authenticate().
+        // The Antigravity adapter (`agy-acp`) delegates Google OAuth entirely
+        // to the `agy` CLI (`agy login`). Calling authenticate() would try to
+        // drive an interactive flow from Warp.
         Harness::Gemini => false,
+        // `cursor-agent acp` reads the CLI's own login state (`cursor-agent
+        // login`); its advertised auth method is interactive.
+        Harness::Cursor => false,
         // Devin's ACP server advertises browser auth methods even when `devin acp`
         // is already usable from an authenticated CLI. Calling authenticate() here
         // opens a browser window from Warp and breaks the normal local CLI path.
@@ -94,24 +102,22 @@ pub(crate) fn should_auto_authenticate(harness: Harness) -> bool {
     }
 }
 
-pub(crate) fn default_session_mode(harness: Harness) -> Option<&'static str> {
-    match harness {
-        // cursor-acp uses a dedicated "yolo" session mode that auto-approves tools.
-        Harness::Cursor => Some("yolo"),
-        _ => None,
-    }
+pub(crate) fn default_session_mode(_harness: Harness) -> Option<&'static str> {
+    // Permission prompts are auto-approved by Warp's ACP connection, so no
+    // harness needs a special auto-approve mode. (The retired third-party
+    // cursor-acp adapter used a "yolo" mode; `cursor-agent acp` does not.)
+    None
 }
 
-pub(crate) fn process_env_for_harness(harness: Harness) -> &'static [(&'static str, &'static str)] {
-    match harness {
-        Harness::Cursor => &[("CURSOR_ACP_DEFAULT_MODE", "yolo")],
-        _ => &[],
-    }
+pub(crate) fn process_env_for_harness(_harness: Harness) -> &'static [(&'static str, &'static str)] {
+    &[]
 }
 
 pub(crate) fn removed_process_env_for_harness(harness: Harness) -> &'static [&'static str] {
     match harness {
         Harness::Codex => &["ANTHROPIC_API_KEY"],
+        // `agy` manages its own Google OAuth; strip ambient Google/Anthropic
+        // credentials so they can't leak into or confuse the subprocess.
         Harness::Gemini => &[
             "ANTHROPIC_API_KEY",
             "GOOGLE_API_KEY",

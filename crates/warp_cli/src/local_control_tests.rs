@@ -1,10 +1,27 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 
 use clap_complete::aot::Shell;
 use local_control::protocol::{ActionKind, ControlError, ErrorCode};
 use serde_json::json;
+use serial_test::serial;
 
 use super::*;
+
+const DISCOVERY_DIR_ENV: &str = "WARP_LOCAL_CONTROL_DISCOVERY_DIR";
+
+fn set_discovery_dir(path: &std::path::Path) -> Option<OsString> {
+    let previous = std::env::var_os(DISCOVERY_DIR_ENV);
+    unsafe { std::env::set_var(DISCOVERY_DIR_ENV, path) };
+    previous
+}
+
+fn restore_discovery_dir(previous: Option<OsString>) {
+    match previous {
+        Some(value) => unsafe { std::env::set_var(DISCOVERY_DIR_ENV, value) },
+        None => unsafe { std::env::remove_var(DISCOVERY_DIR_ENV) },
+    }
+}
 
 #[test]
 fn parses_typed_create_and_setting_list_params() {
@@ -210,7 +227,7 @@ fn instance_list_output_serializes_empty_and_populated_lists() {
 
 #[test]
 fn excluded_actions_are_not_allowlisted_catalog_entries() {
-    for excluded in ["auth.api_key.set", "file.write", "block.list"] {
+    for excluded in ["auth.api_key.set", "file.write", "file.delete"] {
         assert!(
             ActionKind::ALL
                 .iter()
@@ -242,7 +259,11 @@ fn every_retained_catalog_action_has_a_parseable_cli_example() {
         assert_eq!(parsed_action_kind(&args.command), Some(kind));
         covered.insert(kind);
     }
-    let expected = ActionKind::ALL.iter().copied().collect::<HashSet<_>>();
+    let expected = ActionKind::ALL
+        .iter()
+        .copied()
+        .filter(|kind| kind.is_implemented())
+        .collect::<HashSet<_>>();
     let missing = expected
         .difference(&covered)
         .map(|kind| kind.as_str())
@@ -302,6 +323,39 @@ fn renders_human_readable_tab_create_output() {
         rendered,
         "Created tab tab_123 in window window_123 (active index 2, tab count 3)"
     );
+}
+
+#[test]
+#[serial]
+fn instance_list_without_discovery_records_succeeds() {
+    let dir = std::env::temp_dir().join(format!(
+        "warpctrl-empty-discovery-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp discovery dir is created");
+    let previous = set_discovery_dir(&dir);
+    let args = ControlArgs::try_parse_from(["warpctrl", "instance", "list"])
+        .expect("instance list parses");
+    let result = run_inner(args);
+    restore_discovery_dir(previous);
+    result.expect("empty instance list succeeds");
+}
+
+#[test]
+#[serial]
+fn tab_create_without_discovery_records_reports_no_instance() {
+    let dir = std::env::temp_dir().join(format!(
+        "warpctrl-empty-discovery-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp discovery dir is created");
+    let previous = set_discovery_dir(&dir);
+    let args =
+        ControlArgs::try_parse_from(["warpctrl", "--output-format", "json", "tab", "create"])
+            .expect("tab create parses");
+    let error = run_inner(args).expect_err("missing instance is rejected");
+    restore_discovery_dir(previous);
+    assert_eq!(error.code, ErrorCode::NoInstance);
 }
 
 fn retained_action_examples() -> Vec<(ActionKind, Vec<&'static str>)> {
@@ -401,6 +455,14 @@ fn retained_action_examples() -> Vec<(ActionKind, Vec<&'static str>)> {
         (
             ActionKind::PaneResetName,
             vec!["warpctrl", "pane", "reset-name"],
+        ),
+        (
+            ActionKind::BlockOutput,
+            vec!["warpctrl", "pane", "read"],
+        ),
+        (
+            ActionKind::InputRun,
+            vec!["warpctrl", "pane", "run", "pwd"],
         ),
         (ActionKind::SessionList, vec!["warpctrl", "session", "list"]),
         (
@@ -637,6 +699,9 @@ fn parsed_action_kind(command: &ControlCommand) -> Option<ActionKind> {
             PaneCommand::Close(_) => Some(ActionKind::PaneClose),
             PaneCommand::Rename(_) => Some(ActionKind::PaneRename),
             PaneCommand::ResetName(_) => Some(ActionKind::PaneResetName),
+            PaneCommand::Read(_) => Some(ActionKind::BlockOutput),
+            PaneCommand::Send(_) => Some(ActionKind::InputInsert),
+            PaneCommand::Run(_) => Some(ActionKind::InputRun),
         },
         ControlCommand::Session(command) => match command {
             SessionCommand::List(_) => Some(ActionKind::SessionList),

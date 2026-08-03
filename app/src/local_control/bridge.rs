@@ -10,7 +10,7 @@ use ::local_control::{
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::local_control::handlers::{
-    app_state, close, metadata, metadata_config, settings_surfaces,
+    app_state, close, metadata, metadata_config, panes, settings_surfaces,
 };
 use crate::local_control::permissions::{
     ensure_action_allowed, ensure_feature_enabled, ensure_protocol_version,
@@ -186,6 +186,17 @@ impl LocalControlBridge {
             ActionKind::WindowClose => close::window_close(&self.instance_id, &request, ctx),
             ActionKind::TabClose => close::tab_close(&self.instance_id, &request, ctx),
             ActionKind::PaneClose => close::pane_close(&self.instance_id, &request, ctx),
+            ActionKind::BlockOutput => {
+                panes::pane_read_screen(&request.target, &request.action, ctx)
+            }
+            ActionKind::InputRun => panes::input_run(&request.target, &request.action, ctx),
+            action => Err(ControlError::new(
+                ErrorCode::UnsupportedAction,
+                format!(
+                    "{} is not implemented by this local-control bridge",
+                    action.as_str()
+                ),
+            )),
         };
         match result {
             Ok(data) => ResponseEnvelope::ok(request.request_id, data),

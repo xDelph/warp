@@ -5,7 +5,7 @@ GitHub: https://github.com/warpdotdev/warp/issues/9233
 ACP references:
 - Claude (prior art): https://github.com/warpdotdev/warp/commit/50346158548e641c3fb8cce53ec8a7a1c0a2d15d
 - Cursor: https://github.com/raphaelluethy/cursor-acp
-- Codex: https://github.com/zed-industries/codex-acp
+- Codex: https://github.com/agentclientprotocol/codex-acp
 - Gemini: https://geminicli.com/docs/cli/acp-mode/
 - Devin: https://docs.devin.ai/cli/reference/commands#devin-acp
 

@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::thread;
 
 use acpx::RuntimeContext;
 use anyhow::{anyhow, Context, Result};
 use async_process::Command;
 use futures::StreamExt;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot};
 use warp_cli::agent::Harness;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
@@ -30,6 +29,11 @@ pub(crate) enum LocalAcpSubmitModelEvent {
 #[derive(Debug, Clone)]
 pub(crate) struct LocalAcpSubmitRequest {
     pub(crate) prompt: String,
+    /// Transcript digest prepended to `prompt` on the wire when this prompt
+    /// continues a conversation the target harness has no session context
+    /// for (harness switch mid-conversation, or restored conversation).
+    /// Never shown in the conversation UI.
+    pub(crate) context_primer: Option<String>,
     pub(crate) harness: Harness,
     pub(crate) model_id: Option<String>,
     pub(crate) gemini_api_key: Option<String>,
@@ -37,11 +41,40 @@ pub(crate) struct LocalAcpSubmitRequest {
     pub(crate) conversation_id: AIConversationId,
     pub(crate) stream_id: ResponseStreamId,
     pub(crate) terminal_view_id: EntityId,
+    /// When set, the agent subprocess is spawned over SSH on this host instead
+    /// of locally. ACP speaks over stdio, so the transport is transparent.
+    pub(crate) remote: Option<LocalAcpRemoteTarget>,
+    /// When set, the request runs on a dedicated worker keyed by this tag
+    /// instead of the shared `(harness, cwd)` worker. Agent-team members use
+    /// their conversation ID here so each member owns its own agent process
+    /// and members prompt in parallel instead of queueing on one worker.
+    pub(crate) worker_tag: Option<AIConversationId>,
+}
+
+/// Remote spawn target for a local-ACP agent. The subprocess becomes
+/// `ssh <host> "bash -lc 'cd <cwd> && exec <agent command>'"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LocalAcpRemoteTarget {
+    pub(crate) host: String,
+    pub(crate) cwd: String,
+}
+
+/// Routing info for collecting an agent-team member's response back into the
+/// team lead's conversation stream.
+#[derive(Debug, Clone)]
+pub(crate) struct LocalAcpTeamCollect {
+    pub(crate) member_name: String,
+    pub(crate) lead_conversation_id: AIConversationId,
+    pub(crate) lead_stream_id: ResponseStreamId,
+    pub(crate) lead_terminal_view_id: EntityId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalAcpSubmitResult {
     pub(crate) session_id: String,
+    /// Concatenated agent message text for this prompt. Used to report an
+    /// agent-team member's answer back to the team lead's conversation.
+    pub(crate) final_text: String,
 }
 
 enum LocalAcpStreamEvent {
@@ -64,6 +97,27 @@ impl LocalAcpSubmitModel {
     }
 
     pub(crate) fn submit(&mut self, request: LocalAcpSubmitRequest, ctx: &mut ModelContext<Self>) {
+        self.submit_with_collect(request, None, ctx);
+    }
+
+    /// Submits like [`Self::submit`], and additionally reports the member's
+    /// final answer (or failure) to the [`super::team::LocalAcpTeamModel`] so
+    /// it can be collected into the team lead's conversation.
+    pub(crate) fn submit_for_team(
+        &mut self,
+        request: LocalAcpSubmitRequest,
+        collect: LocalAcpTeamCollect,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.submit_with_collect(request, Some(collect), ctx);
+    }
+
+    fn submit_with_collect(
+        &mut self,
+        request: LocalAcpSubmitRequest,
+        collect: Option<LocalAcpTeamCollect>,
+        ctx: &mut ModelContext<Self>,
+    ) {
         self.active_submission = Some(request.clone());
         let completion_request = request.clone();
         let stream_stream_id = completion_request.stream_id.clone();
@@ -103,6 +157,15 @@ impl LocalAcpSubmitModel {
             },
             move |me, result, ctx| {
                 me.active_submission = None;
+                if let Some(collect) = collect {
+                    let member_result = match &result {
+                        Ok(result) => Ok(result.final_text.clone()),
+                        Err(error) => Err(format!("{error:#}")),
+                    };
+                    super::team::LocalAcpTeamModel::handle(ctx).update(ctx, |team_model, ctx| {
+                        team_model.complete_member_dispatch(&collect, member_result, ctx);
+                    });
+                }
                 match result {
                     Ok(result) => {
                         log::info!("Local ACP session {} completed", result.session_id,);
@@ -110,6 +173,10 @@ impl LocalAcpSubmitModel {
                             store.set_session_id(
                                 completion_request.harness,
                                 result.session_id.clone(),
+                            );
+                            store.set_last_harness(
+                                completion_request.conversation_id,
+                                completion_request.harness,
                             );
                         });
                         BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
@@ -154,16 +221,16 @@ impl LocalAcpSubmitModel {
     ) -> oneshot::Receiver<Result<LocalAcpSubmitResult>> {
         let key = LocalAcpWorkerKey::from_submit_request(&request);
         let (result_tx, result_rx) = oneshot::channel();
-        let worker_request = LocalAcpWorkerRequest {
+        let worker_request = LocalAcpWorkerRequest::Submit(LocalAcpSubmitJob {
             request,
             stream_tx,
             result_tx,
-        };
+        });
 
         let sender = self
             .workers
             .entry(key.clone())
-            .or_insert_with(|| spawn_local_acp_worker())
+            .or_insert_with(spawn_local_acp_worker)
             .clone();
 
         if let Err(error) = sender.send(worker_request) {
@@ -171,12 +238,33 @@ impl LocalAcpSubmitModel {
             let sender = self
                 .workers
                 .entry(key)
-                .or_insert_with(|| spawn_local_acp_worker())
+                .or_insert_with(spawn_local_acp_worker)
                 .clone();
             let _ = sender.send(error.0);
         }
 
         result_rx
+    }
+
+    /// Boots the agent subprocess and its ACP session ahead of the first
+    /// prompt so switching into agent mode doesn't pay the multi-second
+    /// spawn → initialize → session/new cold start.
+    ///
+    /// Best effort: no result is surfaced; a failed warm-up simply falls back
+    /// to the cold-boot path on submit.
+    pub(crate) fn prewarm(&mut self, harness: Harness, cwd: PathBuf) {
+        let key = LocalAcpWorkerKey {
+            harness,
+            cwd: cwd.clone(),
+            remote: None,
+            tag: None,
+        };
+        let sender = self
+            .workers
+            .entry(key)
+            .or_insert_with(spawn_local_acp_worker)
+            .clone();
+        let _ = sender.send(LocalAcpWorkerRequest::WarmUp { harness, cwd });
     }
 }
 
@@ -190,6 +278,10 @@ impl SingletonEntity for LocalAcpSubmitModel {}
 struct LocalAcpWorkerKey {
     harness: Harness,
     cwd: PathBuf,
+    remote: Option<LocalAcpRemoteTarget>,
+    /// Dedicated-worker tag (agent-team member conversation ID). `None` for
+    /// the shared per-`(harness, cwd)` worker.
+    tag: Option<AIConversationId>,
 }
 
 impl LocalAcpWorkerKey {
@@ -197,11 +289,18 @@ impl LocalAcpWorkerKey {
         Self {
             harness: request.harness,
             cwd: request.cwd.clone(),
+            remote: request.remote.clone(),
+            tag: request.worker_tag,
         }
     }
 }
 
-struct LocalAcpWorkerRequest {
+enum LocalAcpWorkerRequest {
+    Submit(LocalAcpSubmitJob),
+    WarmUp { harness: Harness, cwd: PathBuf },
+}
+
+struct LocalAcpSubmitJob {
     request: LocalAcpSubmitRequest,
     stream_tx: async_channel::Sender<LocalAcpStreamEvent>,
     result_tx: oneshot::Sender<Result<LocalAcpSubmitResult>>,
@@ -211,6 +310,10 @@ struct LocalAcpWorkerSession {
     connection: Connection,
     session_id: acp::SessionId,
     config_options: Option<Vec<acp::SessionConfigOption>>,
+    /// The agent reported its models through the session `models` field
+    /// (newer ACP spec shape, e.g. codex-acp, cursor-agent) — model selection
+    /// then goes through `session/set_model`, not config options.
+    has_session_models: bool,
     applied_model_id: Option<String>,
     applied_mode: Option<String>,
 }
@@ -235,12 +338,25 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
     let mut session = None;
 
     while let Some(worker_request) = rx.recv().await {
-        let result = submit_local_acp_query_on_worker(
-            &mut session,
-            worker_request.request,
-            worker_request.stream_tx,
-        )
-        .await;
+        let job = match worker_request {
+            LocalAcpWorkerRequest::Submit(job) => job,
+            LocalAcpWorkerRequest::WarmUp { harness, cwd } => {
+                if session.is_none() {
+                    match start_local_acp_session(harness, &cwd, None, None, None).await {
+                        Ok(warm_session) => {
+                            log::debug!("prewarmed local ACP session for {harness} in {cwd:?}");
+                            session = Some(warm_session);
+                        }
+                        Err(error) => {
+                            log::debug!("failed to prewarm local ACP session for {harness}: {error:#}");
+                        }
+                    }
+                }
+                continue;
+            }
+        };
+        let result =
+            submit_local_acp_query_on_worker(&mut session, job.request, job.stream_tx).await;
         if result.is_err() {
             if let Some(session) = session.take() {
                 if let Err(error) = session.connection.close().await {
@@ -248,7 +364,7 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
                 }
             }
         }
-        let _ = worker_request.result_tx.send(result);
+        let _ = job.result_tx.send(result);
     }
 
     if let Some(session) = session {
@@ -270,6 +386,7 @@ async fn submit_local_acp_query_on_worker(
                 &request.cwd,
                 request.model_id.as_deref(),
                 request.gemini_api_key.as_deref(),
+                request.remote.as_ref(),
             )
             .await?,
         );
@@ -288,15 +405,23 @@ async fn start_local_acp_session(
     cwd: &PathBuf,
     model_id: Option<&str>,
     gemini_api_key: Option<&str>,
+    remote: Option<&LocalAcpRemoteTarget>,
 ) -> Result<LocalAcpWorkerSession> {
     let spec = registry::spec_for_harness(harness)
         .ok_or_else(|| anyhow!("{} does not support local ACP", harness))?;
-    let program = path_search::resolve_harness_command(harness, spec.command)
-        .with_context(|| format!("{} ACP command '{}' was not found", harness, spec.command))?;
 
-    let mut command = Command::new(program);
-    command.args(spec.args);
-    command.current_dir(cwd);
+    let mut command = if let Some(remote) = remote {
+        let mut command = Command::new("ssh");
+        command.args(remote_ssh_args(remote, spec.command, spec.args));
+        command
+    } else {
+        let program = path_search::resolve_harness_command(harness, spec.command)
+            .with_context(|| format!("{} ACP command '{}' was not found", harness, spec.command))?;
+        let mut command = Command::new(program);
+        command.args(spec.args);
+        command.current_dir(cwd);
+        command
+    };
     configure_process_env(&mut command, harness, gemini_api_key);
 
     let runtime = RuntimeContext::new(|task| {
@@ -315,16 +440,23 @@ async fn start_local_acp_session(
         }
     }
 
+    // The agent resolves the session cwd on the machine it runs on.
+    let session_cwd = match remote {
+        Some(remote) => PathBuf::from(&remote.cwd),
+        None => cwd.clone(),
+    };
     let session = connection
-        .new_session(new_session_request(harness, cwd))
+        .new_session(new_session_request(harness, &session_cwd))
         .await?;
     let session_id = session.session_id.clone();
     let config_options = session.config_options.clone();
+    let has_session_models = session.models.is_some();
 
     let mut worker_session = LocalAcpWorkerSession {
         connection,
         session_id,
         config_options,
+        has_session_models,
         applied_model_id: None,
         applied_mode: None,
     };
@@ -333,7 +465,49 @@ async fn start_local_acp_session(
     Ok(worker_session)
 }
 
-fn configure_process_env(command: &mut Command, harness: Harness, gemini_api_key: Option<&str>) {
+/// Builds the ssh argument list that runs an ACP agent on a remote host with
+/// its stdio piped back to Warp. `bash -lc` gives the login PATH (agents are
+/// commonly installed under `~/.bun/bin` or `~/.local/bin`).
+fn remote_ssh_args(
+    remote: &LocalAcpRemoteTarget,
+    agent_command: &str,
+    agent_args: &[&str],
+) -> Vec<String> {
+    let mut remote_command = agent_command.to_string();
+    for arg in agent_args {
+        remote_command.push(' ');
+        remote_command.push_str(arg);
+    }
+    // The remote login shell strips the outer double quotes (pass 1), so
+    // `bash -lc` receives `cd <cwd> && exec <cmd>` where a leading `~` is
+    // unquoted and expands in bash's own pass. `cwd` comes from Warp's team
+    // config (never raw user text); escape the double-quote metacharacters
+    // so a hostile path can't break out of the payload.
+    vec![
+        // No TTY: ACP is a stdio JSON-RPC stream.
+        "-T".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        remote.host.clone(),
+        format!(
+            "bash -lc \"cd {} && exec {}\"",
+            escape_remote_shell_word(&remote.cwd),
+            remote_command
+        ),
+    ]
+}
+
+/// Escapes characters that would break out of the double-quoted `bash -lc`
+/// payload of [`remote_ssh_args`].
+fn escape_remote_shell_word(value: &str) -> String {
+    value
+        .replace('\\', r"\\")
+        .replace('"', "\\\"")
+        .replace('$', r"\$")
+        .replace('`', r"\`")
+}
+
+fn configure_process_env(command: &mut Command, harness: Harness, _gemini_api_key: Option<&str>) {
     command.env("PATH", path_search::augmented_path_env());
     for key in registry::removed_process_env_for_harness(harness) {
         command.env_remove(key);
@@ -341,13 +515,9 @@ fn configure_process_env(command: &mut Command, harness: Harness, gemini_api_key
     for (key, value) in registry::process_env_for_harness(harness) {
         command.env(key, value);
     }
-    if harness == Harness::Gemini {
-        if let Some(api_key) = gemini_api_key.filter(|key| !key.trim().is_empty()) {
-            command.env("GEMINI_API_KEY", api_key);
-        } else {
-            command.env_remove("GEMINI_API_KEY");
-        }
-    }
+    // Note: the retired Gemini CLI needed GEMINI_API_KEY injected per
+    // request; its replacement (Antigravity via agy-acp) manages Google
+    // OAuth itself, so no per-request credentials are set anymore.
 }
 
 async fn apply_session_preferences(
@@ -402,55 +572,53 @@ async fn apply_session_preferences(
         return Ok(());
     }
 
-    if harness == Harness::Gemini {
-        apply_gemini_session_model(&session.connection, &session.session_id, model_id).await?;
-        session.applied_model_id = Some(model_id.to_string());
-        return Ok(());
-    }
-
-    if let Some(model_config_id) = model_config_id(session.config_options.as_deref()) {
-        if let Err(error) = session
+    // Agents that report models via the session `models` field (codex-acp,
+    // cursor-agent) take model selection through `session/set_model`; the
+    // config-option path below does not exist for them.
+    if session.has_session_models {
+        match session
             .connection
-            .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+            .set_session_model(acp::SetSessionModelRequest::new(
                 session.session_id.clone(),
-                model_config_id,
                 model_id.to_string(),
             ))
             .await
         {
-            log::debug!("ACP agent did not accept model config selection: {error:#}");
-        } else {
-            session.applied_model_id = Some(model_id.to_string());
+            Ok(_) => {
+                session.applied_model_id = Some(model_id.to_string());
+                return Ok(());
+            }
+            Err(error) => {
+                log::debug!("ACP agent did not accept model via session/set_model: {error:#}");
+            }
         }
+    }
+
+    // Agents that deliver their model option asynchronously (e.g. the
+    // Antigravity agy-acp adapter via `config_option_update`) may not have a
+    // model option captured at session/new time — fall back to the
+    // conventional "model" config id rather than skipping selection.
+    let model_config_id = model_config_id(session.config_options.as_deref())
+        .unwrap_or_else(|| acp::SessionConfigId::new("model"));
+    if let Err(error) = session
+        .connection
+        .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
+            session.session_id.clone(),
+            model_config_id,
+            model_id.to_string(),
+        ))
+        .await
+    {
+        log::debug!("ACP agent did not accept model config selection: {error:#}");
     } else {
-        log::warn!("ACP agent exposes no model config option — model '{model_id}' was not applied");
+        session.applied_model_id = Some(model_id.to_string());
     }
 
     Ok(())
 }
 
-async fn apply_gemini_session_model(
-    connection: &Connection,
-    session_id: &acp::SessionId,
-    model_id: &str,
-) -> Result<()> {
-    let params = serde_json::value::to_raw_value(&json!({
-        "sessionId": session_id,
-        "modelId": model_id,
-    }))
-    .context("failed to serialize Gemini model selection params")?;
-    connection
-        .ext_method(acp::ExtRequest::new(
-            "unstable_setSessionModel",
-            Arc::from(params),
-        ))
-        .await
-        .context("Gemini rejected model selection")?;
-    Ok(())
-}
-
-fn new_session_request(harness: Harness, cwd: &PathBuf) -> acp::NewSessionRequest {
-    let mut new_session = acp::NewSessionRequest::new(cwd.clone());
+fn new_session_request(harness: Harness, cwd: &std::path::Path) -> acp::NewSessionRequest {
+    let mut new_session = acp::NewSessionRequest::new(cwd.to_path_buf());
     if harness == Harness::Cursor {
         if let Some(mode_id) = registry::default_session_mode(harness) {
             let mut meta = Map::new();
@@ -471,11 +639,14 @@ async fn prompt_local_acp_session(
 ) -> Result<LocalAcpSubmitResult> {
     let mut notifications = session.connection.subscribe_session_updates();
     let mut tool_calls_by_id: HashMap<String, LocalAcpToolCallMessage> = HashMap::new();
+    let mut final_text = String::new();
+    let prompt_text = match &request.context_primer {
+        Some(primer) => format!("{primer}\n\n{}", request.prompt),
+        None => request.prompt.clone(),
+    };
     let mut prompt = Box::pin(session.connection.prompt(acp::PromptRequest::new(
         session.session_id.clone(),
-        vec![acp::ContentBlock::Text(acp::TextContent::new(
-            request.prompt,
-        ))],
+        vec![acp::ContentBlock::Text(acp::TextContent::new(prompt_text))],
     )));
 
     loop {
@@ -507,6 +678,9 @@ async fn prompt_local_acp_session(
                     }
                     update => {
                         if let Some(event) = stream_event_from_update(update) {
+                            if let LocalAcpStreamEvent::Text(text) = &event {
+                                final_text.push_str(text);
+                            }
                             let _ = stream_tx.send(event).await;
                         }
                     }
@@ -517,6 +691,7 @@ async fn prompt_local_acp_session(
 
     Ok(LocalAcpSubmitResult {
         session_id: session.session_id.to_string(),
+        final_text,
     })
 }
 
@@ -544,5 +719,175 @@ fn stream_event_from_update(update: acp::SessionUpdate) -> Option<LocalAcpStream
             _ => None,
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn worker_keys_with_distinct_tags_get_distinct_workers() {
+        let base = LocalAcpWorkerKey {
+            harness: Harness::Claude,
+            cwd: PathBuf::from("/tmp"),
+            remote: None,
+            tag: None,
+        };
+        let member_a = LocalAcpWorkerKey {
+            tag: Some(AIConversationId::new()),
+            ..base.clone()
+        };
+        let member_b = LocalAcpWorkerKey {
+            tag: Some(AIConversationId::new()),
+            ..base.clone()
+        };
+        assert_ne!(base, member_a);
+        assert_ne!(member_a, member_b);
+    }
+
+    #[test]
+    fn remote_ssh_args_wrap_agent_command_for_login_shell() {
+        let remote = LocalAcpRemoteTarget {
+            host: "genesis".to_string(),
+            cwd: "~/sync/warp".to_string(),
+        };
+        let args = remote_ssh_args(&remote, "devin", &["acp"]);
+        assert_eq!(
+            args,
+            vec![
+                "-T".to_string(),
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                "genesis".to_string(),
+                "bash -lc \"cd ~/sync/warp && exec devin acp\"".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn remote_ssh_args_escape_double_quote_metacharacters_in_cwd() {
+        // The cwd lands inside a double-quoted `bash -lc` payload on the
+        // remote side; $, `, " and \ must be neutralized so a hostile or
+        // malformed directory name can't break out of it.
+        let remote = LocalAcpRemoteTarget {
+            host: "genesis".to_string(),
+            cwd: "~/sync/$(reboot)".to_string(),
+        };
+        let args = remote_ssh_args(&remote, "codex-acp", &[]);
+        assert_eq!(args[4], r#"bash -lc "cd ~/sync/\$(reboot) && exec codex-acp""#);
+
+        let remote = LocalAcpRemoteTarget {
+            host: "genesis".to_string(),
+            cwd: r#"~/sync/we"ird\`dir`"#.to_string(),
+        };
+        let args = remote_ssh_args(&remote, "codex-acp", &[]);
+        assert_eq!(
+            args[4],
+            r#"bash -lc "cd ~/sync/we\"ird\\\`dir\` && exec codex-acp""#
+        );
+    }
+
+    fn submit_toy_request_to_worker(
+        member_name: &'static str,
+        task: &'static str,
+        cwd: PathBuf,
+    ) -> oneshot::Receiver<Result<LocalAcpSubmitResult>> {
+        let member_conversation_id = AIConversationId::new();
+        let prompt = super::super::team::member_prompt_text(
+            "claude team",
+            member_name,
+            &cwd.display().to_string(),
+            task,
+        );
+        let request = LocalAcpSubmitRequest {
+            prompt,
+            context_primer: None,
+            harness: Harness::Claude,
+            model_id: None,
+            gemini_api_key: None,
+            cwd,
+            conversation_id: member_conversation_id,
+            stream_id: ResponseStreamId::new_local(),
+            terminal_view_id: EntityId::new(),
+            remote: None,
+            worker_tag: Some(member_conversation_id),
+        };
+        // Stream events are unused here; the worker ignores send errors from
+        // a dropped receiver. The queued job is processed before the worker
+        // notices its sender is gone, so dropping `worker` right after the
+        // send also makes the worker thread exit cleanly once it answered.
+        let (stream_tx, _stream_rx) = async_channel::unbounded();
+        let (result_tx, result_rx) = oneshot::channel();
+        let worker = spawn_local_acp_worker();
+        worker
+            .send(LocalAcpWorkerRequest::Submit(LocalAcpSubmitJob {
+                request,
+                stream_tx,
+                result_tx,
+            }))
+            .expect("worker accepts the submit job");
+        result_rx
+    }
+
+    /// Real 1-lead + 2-teammate claude team on a toy task, driven through the
+    /// production worker loop: two dedicated workers (one per teammate) each
+    /// boot their own `claude-agent-acp` subprocess, receive the exact
+    /// member prompt the team dispatcher builds, and the "lead" (this test)
+    /// collects both final answers. Requires claude-agent-acp + Claude auth;
+    /// skips when the binary is not installed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn claude_team_lead_collects_results_from_two_teammates() {
+        if path_search::resolve_command("claude-agent-acp").is_none() {
+            eprintln!("claude-agent-acp not installed, skipping");
+            return;
+        }
+        let cwd = std::env::temp_dir();
+
+        let teammate_1 = submit_toy_request_to_worker(
+            "teammate-1",
+            "Reply with exactly this token and nothing else: TEAM_ALPHA_OK",
+            cwd.clone(),
+        );
+        let teammate_2 = submit_toy_request_to_worker(
+            "teammate-2",
+            "What is 2+3? Reply with only the number.",
+            cwd,
+        );
+
+        let timeout = Duration::from_secs(180);
+        let (result_1, result_2) = tokio::join!(
+            tokio::time::timeout(timeout, teammate_1),
+            tokio::time::timeout(timeout, teammate_2),
+        );
+
+        let result_1 = result_1
+            .expect("teammate-1 answered within the timeout")
+            .expect("teammate-1 worker returned a result")
+            .expect("teammate-1 prompt succeeded");
+        let result_2 = result_2
+            .expect("teammate-2 answered within the timeout")
+            .expect("teammate-2 worker returned a result")
+            .expect("teammate-2 prompt succeeded");
+
+        eprintln!("teammate-1 ({}): {}", result_1.session_id, result_1.final_text);
+        eprintln!("teammate-2 ({}): {}", result_2.session_id, result_2.final_text);
+
+        assert_ne!(
+            result_1.session_id, result_2.session_id,
+            "each teammate runs in its own agent session"
+        );
+        assert!(
+            result_1.final_text.contains("TEAM_ALPHA_OK"),
+            "teammate-1 answer missing token: {}",
+            result_1.final_text
+        );
+        assert!(
+            result_2.final_text.contains('5'),
+            "teammate-2 answer missing '5': {}",
+            result_2.final_text
+        );
     }
 }

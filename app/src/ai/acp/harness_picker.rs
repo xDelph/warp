@@ -5,7 +5,7 @@ use warp_cli::agent::Harness;
 use warp_errors::report_if_error;
 use warpui::{Entity, ModelContext, SingletonEntity};
 
-use super::{models, registry, telemetry};
+use super::{model_cache, models, registry, telemetry};
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,22 +130,47 @@ impl LocalAcpHarnessModel {
         harness: Harness,
         ctx: &mut ModelContext<Self>,
     ) {
-        match self.model_discovery_status(harness) {
+        let status = self.model_discovery_status(harness);
+        match status {
             LocalAcpModelDiscoveryStatus::Loading | LocalAcpModelDiscoveryStatus::Loaded => return,
             LocalAcpModelDiscoveryStatus::Failed(_) if harness != self.selected_harness => return,
             LocalAcpModelDiscoveryStatus::Idle | LocalAcpModelDiscoveryStatus::Failed(_) => {}
         }
 
-        self.begin_model_discovery(harness, ctx);
+        // Serve the last successful discovery from disk instantly, then refresh
+        // in the background — the picker never waits on an agent handshake
+        // after the first ever discovery for a harness.
+        let has_cached_models = status == LocalAcpModelDiscoveryStatus::Idle
+            && match model_cache::load_fresh(harness) {
+                Some(cached_models) => {
+                    self.set_discovered_models(harness, cached_models, ctx);
+                    true
+                }
+                None => false,
+            };
+
+        if !has_cached_models {
+            self.begin_model_discovery(harness, ctx);
+        }
         ctx.spawn(
             async move { models::discover_models_for_harness(harness).await },
             move |model, result, ctx| match result {
                 Ok(discovered_models) => {
+                    if !discovered_models.is_empty() {
+                        model_cache::store(harness, &discovered_models);
+                    }
+                    if has_cached_models && discovered_models.is_empty() {
+                        // Keep serving the cached list rather than clearing it
+                        // on a degenerate refresh.
+                        return;
+                    }
                     model.set_discovered_models(harness, discovered_models, ctx);
                 }
                 Err(error) => {
                     log::debug!("Failed to discover ACP models for {harness}: {error:#}");
-                    model.set_model_discovery_failed(harness, error.to_string(), ctx);
+                    if !has_cached_models {
+                        model.set_model_discovery_failed(harness, error.to_string(), ctx);
+                    }
                 }
             },
         );
