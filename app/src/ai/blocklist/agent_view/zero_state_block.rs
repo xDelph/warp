@@ -433,7 +433,6 @@ impl View for AgentViewZeroStateBlock {
                     },
                 }
             }
-            }
         } else {
             let mut local_description =
                 "Send a prompt below to start a new conversation".to_owned();
