@@ -134,6 +134,24 @@ impl AvailableShell {
         }
     }
 
+    /// Returns the actual command name for stable naming purposes.
+    /// This extracts the base command from the executable path or command string.
+    pub fn command_name(&self) -> Cow<'_, str> {
+        match self.state.as_ref() {
+            Config::SystemDefault => Cow::from("shell"),
+            Config::KnownLocal(LocalConfig { command, .. })
+            | Config::MSYS2(LocalConfig { command, .. }) => {
+                // Extract the base command (e.g., "codex" from "/usr/local/bin/codex")
+                command.split('/').last().unwrap_or(command).into()
+            }
+            Config::Wsl { distro } => Cow::from(distro),
+            Config::Custom(LocalConfig { command, .. }) => {
+                command.split('/').last().unwrap_or(command).into()
+            }
+            Config::DockerSandbox { .. } => Cow::from("docker"),
+        }
+    }
+
     pub fn details(&self) -> Cow<'_, str> {
         match self.state.as_ref() {
             Config::SystemDefault => Cow::from("System default shell"),

@@ -359,6 +359,7 @@ fn determine_agent_source(
         // appropriate `AgentSource` once that lands.
         LaunchMode::RemoteServerProxy
         | LaunchMode::RemoteServerDaemon { .. }
+        | LaunchMode::RmuxDaemon
         | LaunchMode::Tui { .. } => None,
     }
 }
@@ -376,6 +377,7 @@ fn daemon_codebase_index_snapshot_storage(launch_mode: &LaunchMode) -> Option<Sn
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
+        | LaunchMode::RmuxDaemon
         | LaunchMode::Test { .. }
         | LaunchMode::Tui { .. } => None,
     }
@@ -421,6 +423,11 @@ pub(crate) enum LaunchMode {
         identity_key: String,
     },
 
+    /// RMUX daemon — long-lived headless process serving local RMUX sessions
+    /// via a Unix domain socket. Stays alive after GUI exit for persistence.
+    #[cfg_attr(not(all(unix, feature = "rmux_native_pane")), allow(dead_code))]
+    RmuxDaemon,
+
     /// Run the headless TUI front-end or a one-shot command using its settings
     /// and secure-storage namespace.
     #[cfg_attr(not(feature = "tui"), allow(dead_code))]
@@ -441,11 +448,6 @@ enum TuiEntryPoint {
     },
 }
 
-enum AuthInitialization {
-    Persisted,
-    PendingApiKey(String),
-}
-
 impl LaunchMode {
     fn args(&self) -> Cow<'_, warp_cli::AppArgs> {
         match self {
@@ -454,6 +456,7 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => Cow::Owned(warp_cli::AppArgs::default()),
         }
     }
@@ -468,16 +471,31 @@ impl LaunchMode {
             LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui {
                 entrypoint: TuiEntryPoint::CliCommand { .. },
             } => None,
         }
     }
 
-    fn auth_initialization(&self) -> AuthInitialization {
-        match self.api_key() {
-            Some(api_key) => AuthInitialization::PendingApiKey(api_key),
-            None => AuthInitialization::Persisted,
+    /// Returns whether a startup API key should be installed before its user is fetched.
+    ///
+    /// The interactive TUI defers the key so its UI cannot treat credential presence as a
+    /// validated identity. Other launch modes retain their existing initialization behavior.
+    fn should_initialize_api_key_eagerly(&self) -> bool {
+        match self {
+            LaunchMode::Tui {
+                entrypoint: TuiEntryPoint::Interactive { .. },
+            } => false,
+            LaunchMode::App { .. }
+            | LaunchMode::CommandLine { .. }
+            | LaunchMode::Test { .. }
+            | LaunchMode::RemoteServerProxy
+            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
+            | LaunchMode::Tui {
+                entrypoint: TuiEntryPoint::CliCommand { .. },
+            } => true,
         }
     }
 
@@ -492,6 +510,7 @@ impl LaunchMode {
             | LaunchMode::CommandLine { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => false,
         }
     }
@@ -506,7 +525,8 @@ impl LaunchMode {
             | LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => ::settings::SettingsMode::Gui,
+            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon => ::settings::SettingsMode::Gui,
         }
     }
     /// The platform secure-storage service name for this launch mode.
@@ -524,7 +544,8 @@ impl LaunchMode {
             | LaunchMode::CommandLine { .. }
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => Cow::Borrowed(data_domain),
+            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon => Cow::Borrowed(data_domain),
         }
     }
 
@@ -535,6 +556,7 @@ impl LaunchMode {
             | LaunchMode::CommandLine { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => None,
         }
     }
@@ -557,6 +579,8 @@ impl LaunchMode {
             LaunchMode::RemoteServerProxy => ExecutionMode::Sdk,
             // RemoteServerDaemon gets its own mode for distinct Sentry tagging.
             LaunchMode::RemoteServerDaemon { .. } => ExecutionMode::RemoteServerDaemon,
+            // RmuxDaemon is similar to RemoteServerProxy.
+            LaunchMode::RmuxDaemon => ExecutionMode::Sdk,
         }
     }
 
@@ -567,6 +591,7 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => false,
         }
     }
@@ -578,7 +603,9 @@ impl LaunchMode {
                 CliCommand::Agent(AgentCommand::Run(args)) => !args.gui,
                 _ => true,
             },
-            LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } => true,
+            LaunchMode::RemoteServerProxy
+            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon => true,
             // The TUI front-end renders to the terminal, with no GUI window.
             LaunchMode::Tui { .. } => true,
             LaunchMode::App { .. } | LaunchMode::Test { .. } => false,
@@ -604,7 +631,7 @@ impl LaunchMode {
                 FeatureFlag::RemoteCodebaseIndexing.is_enabled()
             }
             LaunchMode::App { .. } | LaunchMode::Test { .. } => true,
-            LaunchMode::RemoteServerProxy => false,
+            LaunchMode::RemoteServerProxy | LaunchMode::RmuxDaemon => false,
             // Codebase indexing stays off for the TUI until it has deferred
             // persisted-index restore and multi-process-safe snapshot writes
             // (the GUI may run concurrently against the same data dir).
@@ -623,6 +650,7 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerProxy
             | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => false,
         }
     }
@@ -636,6 +664,7 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerDaemon { .. }
             | LaunchMode::RemoteServerProxy
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => true,
         }
     }
@@ -648,6 +677,7 @@ impl LaunchMode {
             | LaunchMode::Test { .. }
             | LaunchMode::RemoteServerDaemon { .. }
             | LaunchMode::RemoteServerProxy
+            | LaunchMode::RmuxDaemon
             | LaunchMode::Tui { .. } => true,
         }
     }
@@ -665,6 +695,7 @@ impl LaunchMode {
             // Proxy must log to stderr because stdout is the protocol channel.
             LaunchMode::RemoteServerProxy => Some(LogDestination::Stderr),
             LaunchMode::RemoteServerDaemon { .. } => Some(LogDestination::File),
+            LaunchMode::RmuxDaemon => Some(LogDestination::Stderr),
             // A TUI owns the terminal, so logs go to a file; stdout/stderr would
             // corrupt the rendered output and the device-code prompt.
             LaunchMode::Tui { .. } => Some(LogDestination::File),
@@ -678,7 +709,8 @@ impl LaunchMode {
             LaunchMode::App { .. } | LaunchMode::Test { .. } => LogFrontend::Gui,
             LaunchMode::CommandLine { .. }
             | LaunchMode::RemoteServerProxy
-            | LaunchMode::RemoteServerDaemon { .. } => LogFrontend::Cli,
+            | LaunchMode::RemoteServerDaemon { .. }
+            | LaunchMode::RmuxDaemon => LogFrontend::Cli,
         }
     }
 
@@ -689,6 +721,7 @@ impl LaunchMode {
             LaunchMode::Test { .. } => "test",
             LaunchMode::RemoteServerDaemon { .. } => "remote_server_daemon",
             LaunchMode::RemoteServerProxy => "remote_server_proxy",
+            LaunchMode::RmuxDaemon => "rmux_daemon",
             LaunchMode::Tui { .. } => "tui",
         }
     }
@@ -883,6 +916,24 @@ fn run_worker_command(worker: &warp_cli::WorkerCommand) -> Result<()> {
             // Daemon handles its own full initialization (including
             // initialize_app and crash reporting) inside run_daemon_app.
             crate::remote_server::run_daemon(args.identity_key.clone())
+        }
+        #[cfg(all(unix, feature = "rmux_native_pane"))]
+        warp_cli::WorkerCommand::RmuxDaemon => {
+            // RMUX daemon uses minimal logging initialization
+            let launch_mode = LaunchMode::RmuxDaemon;
+            let mut tracing_initialization = tracing::init()?;
+            warp_logging::init(warp_logging::LogConfig {
+                frontend: launch_mode.log_frontend(),
+                log_destination: launch_mode.log_destination(),
+                ..Default::default()
+            })?;
+            tracing_initialization.log_initialization_warning();
+            crate::remote_server::run_rmux_daemon()
+        }
+        #[cfg(not(all(unix, feature = "rmux_native_pane")))]
+        warp_cli::WorkerCommand::RmuxDaemon => {
+            // RMUX daemon not supported without rmux_native_pane feature
+            anyhow::bail!("rmux-daemon requires the rmux_native_pane feature")
         }
         #[cfg(not(target_family = "wasm"))]
         warp_cli::WorkerCommand::RipgrepSearch {
@@ -1505,14 +1556,16 @@ pub(crate) fn initialize_app(
         ctx.set_zoom_factor(WindowSettings::as_ref(ctx).zoom_level.as_zoom_factor());
     }
 
-    let (auth_state, pending_api_key) = match launch_mode.auth_initialization() {
-        AuthInitialization::Persisted => (AuthState::initialize(ctx), None),
-        AuthInitialization::PendingApiKey(api_key) => (
-            AuthState::initialize_for_credential_validation(ctx),
-            Some(api_key),
-        ),
+    let (api_key, pending_api_key) = if launch_mode.should_initialize_api_key_eagerly() {
+        (launch_mode.api_key(), None)
+    } else {
+        (None, launch_mode.api_key())
     };
-    let auth_state = Arc::new(auth_state);
+    let auth_state = Arc::new(if pending_api_key.is_some() {
+        AuthState::initialize_for_credential_validation(ctx)
+    } else {
+        AuthState::initialize(ctx, api_key)
+    });
     timer.mark_interval_end("AUTH_MANAGER_SET_USER");
 
     let agent_source = determine_agent_source(launch_mode);
@@ -1591,6 +1644,7 @@ pub(crate) fn initialize_app(
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
+        | LaunchMode::RmuxDaemon
         | LaunchMode::Test { .. } => persistence::PersistenceScope::App,
     };
     // Only read the subsets of persisted data this launch mode actually
@@ -1603,6 +1657,7 @@ pub(crate) fn initialize_app(
         LaunchMode::App { .. }
         | LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
+        | LaunchMode::RmuxDaemon
         | LaunchMode::Test { .. } => persistence::PersistedDataScope::Full,
     };
     let (sqlite_data, writer_handles) =
@@ -3096,6 +3151,8 @@ fn launch(ctx: &mut warpui::AppContext, app_state: Option<AppState>, launch_mode
         // The TUI front-end runs its own mount in the run closure and returns
         // before reaching launch().
         LaunchMode::Tui { .. } => unreachable!("LaunchMode::Tui is handled before launch()"),
+        // RMUX daemon runs its own lifecycle and doesn't reach launch().
+        LaunchMode::RmuxDaemon => unreachable!("LaunchMode::RmuxDaemon is handled before launch()"),
         LaunchMode::App { .. } | LaunchMode::Test { .. } => {
             let should_skip_restore = launch_mode
                 .args()

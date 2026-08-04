@@ -70,6 +70,32 @@ pub fn run_daemon(_identity_key: String) -> anyhow::Result<()> {
     anyhow::bail!("remote-server-daemon is not supported on this platform")
 }
 
+/// Run the `rmux-daemon` subcommand.
+#[cfg(all(unix, feature = "rmux_native_pane"))]
+pub fn run_rmux_daemon() -> anyhow::Result<()> {
+    unix::rmux_daemon::run()
+}
+
+#[cfg(not(all(unix, feature = "rmux_native_pane")))]
+pub fn run_rmux_daemon() -> anyhow::Result<()> {
+    anyhow::bail!("rmux-daemon is not supported on this platform")
+}
+
+/// Ensure the RMUX daemon is running and return the socket path.
+///
+/// This is the parent-side helper for local RMUX persistence. It checks if
+/// the daemon is already running (socket exists) and starts it if not, then
+/// returns the socket path for connecting.
+#[cfg(all(unix, feature = "rmux_native_pane"))]
+pub fn ensure_rmux_daemon_running() -> anyhow::Result<std::path::PathBuf> {
+    unix::rmux_daemon::ensure_daemon_running()
+}
+
+#[cfg(not(all(unix, feature = "rmux_native_pane")))]
+pub fn ensure_rmux_daemon_running() -> anyhow::Result<std::path::PathBuf> {
+    anyhow::bail!("RMUX daemon is not supported on this platform")
+}
+
 /// Forwards app auth-token rotation and privacy preference change events
 /// to the remote-server manager.
 #[cfg(not(target_family = "wasm"))]

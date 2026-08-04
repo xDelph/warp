@@ -2,10 +2,11 @@
 //! event loop can be exercised against a fake client in tests without an
 //! external `rmux` daemon.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rmux_sdk::{PaneSnapshot, Result as RmuxResult, TerminalSizeSpec};
 use rmux_server::ServerHandle;
-use std::sync::Arc;
 
 use super::input::RmuxInputAction;
 
@@ -131,18 +132,27 @@ pub async fn connect_rmux_pane(
 ) -> anyhow::Result<(std::sync::Arc<dyn RmuxPaneClient>, Option<u32>)> {
     use anyhow::Context as _;
 
-    // For Warp-owned panes, ensure embedded daemon is started before connecting
-    let daemon_handle = if matches!(spec.ownership, super::types::RmuxPaneOwnership::WarpCreated) {
-        Some(super::daemon::ensure_embedded_daemon().await
-            .context("failed to start embedded RMUX daemon")?)
-    } else {
-        None
-    };
+    let rmux = match spec.ownership {
+        super::types::RmuxPaneOwnership::WarpCreated => {
+            // For Warp-owned panes, use the separate RMUX daemon for persistence.
+            // The daemon stays alive after GUI exit, enabling true tmux-like reattach.
+            let socket_path = crate::remote_server::ensure_rmux_daemon_running()
+                .context("failed to ensure RMUX daemon is running")?;
 
-    let rmux = rmux_sdk::Rmux::builder()
-        .connect_or_start()
-        .await
-        .context("connect to rmux daemon (is the `rmux` binary installed?)")?;
+            rmux_sdk::Rmux::builder()
+                .unix_socket(&socket_path)
+                .connect()
+                .await
+                .context("connect to RMUX daemon via Unix socket")?
+        }
+        super::types::RmuxPaneOwnership::ExternallyAttached => {
+            // For externally-created panes, use the external rmux binary.
+            rmux_sdk::Rmux::builder()
+                .connect_or_start()
+                .await
+                .context("connect to rmux daemon (is the `rmux` binary installed?)")?
+        }
+    };
 
     let session_name = rmux_sdk::SessionName::new(&spec.session_name)
         .map_err(|error| anyhow::anyhow!("invalid rmux session name: {error}"))?;
@@ -158,7 +168,7 @@ pub async fn connect_rmux_pane(
         .ensure_session(ensure)
         .await
         .context("ensure rmux session")?;
-    
+
     let pane = match spec.pane_id {
         Some(pane_id) => session
             .pane_by_id(rmux_sdk::PaneId::from(pane_id))
@@ -174,15 +184,15 @@ pub async fn connect_rmux_pane(
 
     // Capture the pane_id for persistence if this is a new pane
     let captured_pane_id = if spec.pane_id.is_none() {
-        pane.id().await.context("read RMUX pane id")?.map(Into::into)
+        pane.id()
+            .await
+            .context("read RMUX pane id")?
+            .map(Into::into)
     } else {
         spec.pane_id
     };
 
-    let client = match daemon_handle {
-        Some(handle) => RmuxSdkPaneClient::with_daemon_handle(pane, handle),
-        None => RmuxSdkPaneClient::new(pane),
-    };
+    let client = RmuxSdkPaneClient::new(pane);
 
     Ok((std::sync::Arc::new(client), captured_pane_id))
 }
@@ -263,7 +273,11 @@ pub mod fake {
         }
 
         async fn send_input(&self, action: RmuxInputAction) -> RmuxResult<()> {
-            self.state.lock().unwrap().calls.push(FakeRmuxCall::Input(action));
+            self.state
+                .lock()
+                .unwrap()
+                .calls
+                .push(FakeRmuxCall::Input(action));
             Ok(())
         }
 
@@ -298,7 +312,7 @@ pub mod fake {
 mod tests {
     use rmux_sdk::TerminalSizeSpec;
 
-    use super::fake::{empty_snapshot, FakeRmuxCall, FakeRmuxPaneClient};
+    use super::fake::{FakeRmuxCall, FakeRmuxPaneClient, empty_snapshot};
     use super::*;
 
     #[tokio::test]

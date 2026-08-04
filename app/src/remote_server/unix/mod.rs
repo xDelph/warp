@@ -8,10 +8,16 @@
 //!   Binds a Unix domain socket, accepts multiple concurrent proxy connections,
 //!   and exits after a grace period with no connections.
 //!
+//! - `rmux_daemon`: entry point for the `rmux-daemon` subcommand.
+//!   Binds rmux-server to a local Unix socket and stays alive after GUI exit.
+//!
 //! All platform-specific code is contained here so that the parent `mod.rs`
 //! is a thin dispatcher with no Unix assumptions.
 
 pub(super) mod proxy;
+
+#[cfg(feature = "rmux_native_pane")]
+pub(super) mod rmux_daemon;
 
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;

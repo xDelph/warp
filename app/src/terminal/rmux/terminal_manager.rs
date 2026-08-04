@@ -6,8 +6,8 @@
 
 use std::any::Any;
 use std::path::PathBuf;
-use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
+use std::sync::mpsc::SyncSender;
 
 use async_channel::Sender;
 use parking_lot::FairMutex;
@@ -16,23 +16,23 @@ use rmux_sdk::TerminalSizeSpec;
 use warpui::{AppContext, ModelHandle, ViewHandle, WindowId};
 
 use super::client::RmuxPaneClient;
-use super::event_loop::{EventLoop, RmuxEventLoopMessage};
+use super::event_loop::{EventLoop, EventLoopEvent, RmuxEventLoopMessage};
 use super::input::map_pty_bytes_to_rmux_input;
-use super::peer::{MessageQueue, RmuxPeer};
+use super::peer::RmuxPeer;
 use super::types::{RmuxPaneOwnership, RmuxPaneSpec};
-use crate::terminal::pane_allocator;
 use crate::context_chips::prompt_type::PromptType;
-use crate::pane_group::pane::DetachType;
 use crate::pane_group::TerminalViewResources;
+use crate::pane_group::pane::DetachType;
 use crate::persistence::ModelEvent;
 use crate::terminal::event_listener::ChannelEventListener;
 use crate::terminal::model::session::Sessions;
 use crate::terminal::model_events::ModelEventDispatcher;
 use crate::terminal::shell::{ShellName, ShellType};
-use crate::terminal::{
-    self as terminal_module, terminal_manager, ShellLaunchState, TerminalModel, TerminalView,
-};
 use crate::terminal::terminal_manager::BlockSpacing;
+use crate::terminal::{
+    self as terminal_module, ShellLaunchState, TerminalModel, TerminalView, pane_allocator,
+    terminal_manager,
+};
 
 /// [`crate::terminal::TerminalManager`] for a single RMUX-backed pane.
 pub struct RmuxTerminalManager {
@@ -43,8 +43,7 @@ pub struct RmuxTerminalManager {
     pub(super) session_name: String,
     cwd: Option<String>,
     ownership: RmuxPaneOwnership,
-    peer: Option<RmuxPeer>,
-    message_queue: MessageQueue,
+    peer: Arc<FairMutex<Option<RmuxPeer>>>,
 }
 
 impl RmuxTerminalManager {
@@ -57,11 +56,13 @@ impl RmuxTerminalManager {
         window_id: WindowId,
         model_event_sender: Option<SyncSender<ModelEvent>>,
         ctx: &mut AppContext,
-    ) -> (ViewHandle<TerminalView>, ModelHandle<Box<dyn terminal_module::TerminalManager>>) {
+    ) -> (
+        ViewHandle<TerminalView>,
+        ModelHandle<Box<dyn terminal_module::TerminalManager>>,
+    ) {
         let ownership = spec.ownership;
         let session_name = spec.session_name.clone();
         let cwd = spec.cwd.clone();
-        let message_queue = MessageQueue::new();
 
         let (wakeups_tx, wakeups_rx) = async_channel::unbounded();
         let (events_tx, events_rx) = async_channel::unbounded();
@@ -114,9 +115,9 @@ impl RmuxTerminalManager {
                 colors,
                 model_event_sender.clone(),
                 prompt_type,
-                None, // initial_input_config
-                None, // conversation_restoration
-                None, // inactive_pty_reads_rx
+                None,  // initial_input_config
+                None,  // conversation_restoration
+                None,  // inactive_pty_reads_rx
                 false, // is_cloud_mode
                 ctx,
             )
@@ -138,6 +139,11 @@ impl RmuxTerminalManager {
 
         Self::wire_up_view_events(&view, message_tx.clone(), ctx);
 
+        // Clone handles for subscription before moving into manager
+        let event_loop_for_subscription = event_loop.clone();
+        let session_name_for_subscription = session_name.clone();
+        let peer_for_subscription = Arc::new(FairMutex::new(None));
+
         let manager = Self {
             model,
             view: view.clone(),
@@ -146,8 +152,7 @@ impl RmuxTerminalManager {
             session_name,
             cwd,
             ownership,
-            peer: None,
-            message_queue,
+            peer: peer_for_subscription.clone(),
         };
 
         let terminal_manager = ctx.add_model(|_ctx| {
@@ -155,11 +160,36 @@ impl RmuxTerminalManager {
             manager
         });
 
+        // Subscribe to event loop connection events to register peer when pane_id is known
+        ctx.subscribe_to_model(
+            &event_loop_for_subscription,
+            move |_manager, event: &EventLoopEvent, _ctx| {
+                if let EventLoopEvent::Connected {
+                    pane_id: Some(pane_id),
+                } = event
+                {
+                    let peer = RmuxPeer::new(session_name_for_subscription.clone(), *pane_id);
+                    peer.register();
+                    // Store peer handle for later use
+                    *peer_for_subscription.lock() = Some(peer);
+                    log::info!(
+                        "Registered RMUX peer: session={}, pane_id={}",
+                        session_name_for_subscription,
+                        pane_id
+                    );
+                }
+            },
+        );
+
         (view, terminal_manager)
     }
 
     /// Builds a persistence snapshot for this pane.
-    pub fn snapshot(&self, uuid: Vec<u8>, ctx: &AppContext) -> crate::app_state::RmuxTerminalPaneSnapshot {
+    pub fn snapshot(
+        &self,
+        uuid: Vec<u8>,
+        ctx: &AppContext,
+    ) -> crate::app_state::RmuxTerminalPaneSnapshot {
         let pane_id = self.event_loop.as_ref(ctx).pane_id();
         crate::app_state::RmuxTerminalPaneSnapshot {
             uuid,
@@ -180,9 +210,7 @@ impl RmuxTerminalManager {
             match event {
                 terminal_module::Event::WriteBytesToPty { bytes } => {
                     let action = map_pty_bytes_to_rmux_input(bytes);
-                    if let Err(error) =
-                        message_tx.try_send(RmuxEventLoopMessage::Input(action))
-                    {
+                    if let Err(error) = message_tx.try_send(RmuxEventLoopMessage::Input(action)) {
                         log::warn!("failed to queue RMUX pane input: {error}");
                     }
                 }
@@ -192,9 +220,7 @@ impl RmuxTerminalManager {
                         new_size.columns().min(u16::MAX as usize) as u16,
                         new_size.rows().min(u16::MAX as usize) as u16,
                     );
-                    if let Err(error) =
-                        message_tx.try_send(RmuxEventLoopMessage::Resize(size))
-                    {
+                    if let Err(error) = message_tx.try_send(RmuxEventLoopMessage::Resize(size)) {
                         log::warn!("failed to queue RMUX pane resize: {error}");
                     }
                 }
@@ -207,29 +233,9 @@ impl RmuxTerminalManager {
         self.event_loop.as_ref(ctx).client()
     }
 
-    /// Ensures peer is registered if not already.
-    /// Called lazily when peer functionality is needed.
-    fn ensure_peer_registered(&mut self, ctx: &AppContext) {
-        if self.peer.is_some() {
-            return;
-        }
-
-        if let Some(pane_id) = self.event_loop.as_ref(ctx).pane_id() {
-            let peer = RmuxPeer::new(
-                self.session_name.clone(),
-                pane_id,
-                self.message_queue.clone(),
-            );
-            peer.register();
-            self.peer = Some(peer);
-            log::info!("Registered RMUX peer: session={}, pane_id={}", self.session_name, pane_id);
-        }
-    }
-
-    /// Returns the peer handle for this pane, registering if needed.
-    pub fn peer(&mut self, ctx: &AppContext) -> Option<&RmuxPeer> {
-        self.ensure_peer_registered(ctx);
-        self.peer.as_ref()
+    /// Returns the peer handle for this pane if registered.
+    pub fn peer(&self) -> Arc<FairMutex<Option<RmuxPeer>>> {
+        self.peer.clone()
     }
 }
 
@@ -246,7 +252,7 @@ impl terminal_module::TerminalManager for RmuxTerminalManager {
         let _ = self.message_tx.try_send(RmuxEventLoopMessage::Shutdown);
 
         // Unregister peer if registered
-        if let Some(peer) = &self.peer {
+        if let Some(peer) = self.peer.lock().take() {
             peer.unregister();
         }
 

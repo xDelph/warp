@@ -10,7 +10,7 @@ use ::local_control::{
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::local_control::handlers::{
-    app_state, close, metadata, metadata_config, panes, settings_surfaces,
+    app_state, close, metadata, metadata_config, panes, rmux, settings_surfaces,
 };
 use crate::local_control::permissions::{
     ensure_action_allowed, ensure_feature_enabled, ensure_protocol_version,
@@ -190,6 +190,11 @@ impl LocalControlBridge {
                 panes::pane_read_screen(&request.target, &request.action, ctx)
             }
             ActionKind::InputRun => panes::input_run(&request.target, &request.action, ctx),
+            ActionKind::RmuxPeerList => rmux::rmux_peer_list(&request.target, ctx),
+            ActionKind::RmuxMessageSend => {
+                rmux::rmux_message_send(&request.target, &request.action, ctx)
+            }
+            ActionKind::RmuxMessageDrain => rmux::rmux_message_drain(&request.target, ctx),
             action => Err(ControlError::new(
                 ErrorCode::UnsupportedAction,
                 format!(

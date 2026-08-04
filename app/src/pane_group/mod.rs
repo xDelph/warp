@@ -6212,14 +6212,19 @@ impl PaneGroup {
                 let is_new_local_pane = matches!(is_shared_session, IsSharedSessionCreator::No)
                     && conversation_restoration.is_none()
                     && initial_input_config.is_none();
-                
+
                 if is_new_local_pane {
                     use crate::terminal::rmux::{RmuxPaneOwnership, RmuxPaneSpec};
                     use crate::terminal::pane_allocator;
 
-                    // Agent launch context is not available at this boundary yet.
+                    // Extract base command from chosen shell for stable naming (e.g., codex-1, codex-2)
+                    // Use actual command-launch metadata via command_name() for accurate naming
+                    let base_command = chosen_shell.as_ref()
+                        .map(|shell| shell.command_name().to_string())
+                        .unwrap_or_else(|| "shell".to_string());
+
                     let session_name = pane_allocator::global_allocator()
-                        .allocate_rmux_session_name(None);
+                        .allocate_rmux_session_name(Some(&base_command));
                     let spec = match startup_directory.as_ref() {
                         Some(cwd) => RmuxPaneSpec::new(
                             session_name,
@@ -6231,7 +6236,7 @@ impl PaneGroup {
                             RmuxPaneOwnership::WarpCreated,
                         ),
                     };
-                    
+
                     let (terminal_view, terminal_manager) =
                         crate::terminal::rmux::RmuxTerminalManager::create_model(
                         spec,
@@ -6863,7 +6868,10 @@ impl PaneGroup {
         window_id: WindowId,
         model_event_sender: Option<SyncSender<ModelEvent>>,
         ctx: &mut ViewContext<Self>,
-    ) -> (ViewHandle<TerminalView>, ModelHandle<Box<dyn TerminalManager>>) {
+    ) -> (
+        ViewHandle<TerminalView>,
+        ModelHandle<Box<dyn TerminalManager>>,
+    ) {
         let (view, terminal_manager) = crate::terminal::rmux::RmuxTerminalManager::create_model(
             spec,
             resources,
@@ -6915,9 +6923,12 @@ impl PaneGroup {
     /// Splits a new RMUX-backed pane off of the currently focused pane, in
     /// `direction`, and focuses it. Behind `FeatureFlag::RmuxNativePane`.
     #[cfg(feature = "rmux_native_pane")]
-    pub fn add_rmux_pane(&mut self, direction: Direction, ctx: &mut ViewContext<Self>) -> Option<PaneId> {
-        let startup_directory =
-            self.startup_path_for_new_session(self.active_session_id(ctx), ctx);
+    pub fn add_rmux_pane(
+        &mut self,
+        direction: Direction,
+        ctx: &mut ViewContext<Self>,
+    ) -> Option<PaneId> {
+        let startup_directory = self.startup_path_for_new_session(self.active_session_id(ctx), ctx);
         let mut spec = crate::terminal::rmux::RmuxPaneSpec::new(
             format!("warp-{}", Uuid::new_v4().simple()),
             crate::terminal::rmux::RmuxPaneOwnership::WarpCreated,
@@ -6928,7 +6939,13 @@ impl PaneGroup {
 
         let (pane_data, _view) = self.create_rmux_pane_data(spec, ctx);
         let base_pane_id = self.focused_pane_id(ctx);
-        let pane_id = self.add_pane(direction, Some(base_pane_id), Box::new(pane_data), true, ctx);
+        let pane_id = self.add_pane(
+            direction,
+            Some(base_pane_id),
+            Box::new(pane_data),
+            true,
+            ctx,
+        );
         ctx.emit(Event::AppStateChanged);
         pane_id
     }

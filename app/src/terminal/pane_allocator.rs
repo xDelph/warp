@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+
 use uuid;
 
 /// Global pane name allocator instance.
@@ -235,8 +236,14 @@ mod tests {
     #[test]
     fn test_parse_pane_name_valid() {
         assert_eq!(parse_pane_name("codex-1"), Some(("codex".to_string(), 1)));
-        assert_eq!(parse_pane_name("claude-42"), Some(("claude".to_string(), 42)));
-        assert_eq!(parse_pane_name("agent-999"), Some(("agent".to_string(), 999)));
+        assert_eq!(
+            parse_pane_name("claude-42"),
+            Some(("claude".to_string(), 42))
+        );
+        assert_eq!(
+            parse_pane_name("agent-999"),
+            Some(("agent".to_string(), 999))
+        );
     }
 
     #[test]
@@ -260,5 +267,40 @@ mod tests {
         let allocator = PaneNameAllocator::new();
         allocator.mark_allocated("invalid-name"); // Should not panic
         assert_eq!(allocator.count_allocated("codex"), 0);
+    }
+
+    #[test]
+    fn test_allocate_rmux_session_name_with_base() {
+        let allocator = PaneNameAllocator::new();
+        let name = allocator.allocate_rmux_session_name(Some("codex"));
+        assert!(name.starts_with("codex-"));
+    }
+
+    #[test]
+    fn test_allocate_rmux_session_name_without_base() {
+        let allocator = PaneNameAllocator::new();
+        let name = allocator.allocate_rmux_session_name(None);
+        assert!(name.starts_with("warp-"));
+        assert!(name.len() > 10); // UUID-based
+    }
+
+    #[test]
+    fn test_allocate_rmux_session_name_reuses_suffix() {
+        let allocator = PaneNameAllocator::new();
+        let name1 = allocator.allocate_rmux_session_name(Some("shell"));
+        allocator.release(&name1);
+        let name2 = allocator.allocate_rmux_session_name(Some("shell"));
+        assert_eq!(name1, name2); // Should reuse the same suffix
+    }
+
+    #[test]
+    fn test_allocate_rmux_session_name_generic_shell() {
+        let allocator = PaneNameAllocator::new();
+        let name1 = allocator.allocate_rmux_session_name(Some("shell"));
+        let name2 = allocator.allocate_rmux_session_name(Some("shell"));
+        let name3 = allocator.allocate_rmux_session_name(Some("shell"));
+        assert_eq!(name1, "shell-1");
+        assert_eq!(name2, "shell-2");
+        assert_eq!(name3, "shell-3");
     }
 }

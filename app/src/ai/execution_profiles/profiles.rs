@@ -76,7 +76,8 @@ fn file_backed_execution_profiles_enabled(launch_mode: &LaunchMode) -> bool {
         }
         LaunchMode::CommandLine { .. }
         | LaunchMode::RemoteServerProxy
-        | LaunchMode::RemoteServerDaemon { .. } => false,
+        | LaunchMode::RemoteServerDaemon { .. }
+        | LaunchMode::RmuxDaemon => false,
     }
 }
 
@@ -371,7 +372,7 @@ impl AIExecutionProfilesModel {
                         // execution profiles. They never reach this code path
                         // since they don't go through initialize_app, but handle
                         // exhaustively.
-                        LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } => DefaultProfileState::Unsynced {
+                        LaunchMode::RemoteServerProxy | LaunchMode::RemoteServerDaemon { .. } | LaunchMode::RmuxDaemon => DefaultProfileState::Unsynced {
                             id: ExecutionProfileId::new(),
                             profile: super::create_default_from_legacy_settings(ctx),
                         },

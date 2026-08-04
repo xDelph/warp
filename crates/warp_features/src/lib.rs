@@ -1061,7 +1061,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::WellKnownMcpIds,
     FeatureFlag::FactoryMcp,
     FeatureFlag::TuiCostTransparency,
-    FeatureFlag::RmuxNativePane,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).
@@ -1082,6 +1081,7 @@ pub const RELEASE_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::SshRemoteServer,
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     FeatureFlag::DragTabsToWindows,
+    FeatureFlag::RmuxNativePane,
 ];
 
 /// Flags that we want to allow to switch at runtime (assuming RuntimeFeatureFlags is set)

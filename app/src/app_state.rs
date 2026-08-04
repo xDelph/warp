@@ -176,15 +176,13 @@ impl LeafContents {
             // Network log: the backing log is an in-memory ring buffer that
             // starts empty on launch; persisting would also regress back to
             // an on-disk log via the app-state database.
-            LeafContents::NetworkLog
+            LeafContents::NetworkLog => false,
             // Environment management panes are opened on-demand via workspace
             // actions and have no persistable state.
-            | LeafContents::EnvironmentManagement(_)
-            // Reconnecting to an RMUX pane across a full app restart depends
-            // on an external daemon that may no longer be running; V1 only
-            // restores RMUX panes within a live session (e.g. moving a pane
-            // to another tab/window), not from the on-disk app-state DB.
-            | LeafContents::RmuxTerminal(_) => false,
+            LeafContents::EnvironmentManagement(_) => false,
+            // RMUX terminals: the separate RMUX daemon stays alive after GUI exit,
+            // enabling true tmux-like reattach via persisted pane_id.
+            LeafContents::RmuxTerminal(_) => true,
             LeafContents::Terminal(_)
             | LeafContents::Notebook(_)
             | LeafContents::AIDocument(_)

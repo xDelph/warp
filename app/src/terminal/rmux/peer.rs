@@ -5,33 +5,52 @@
 //! to discover peers and queue messages. Messages are stored in memory and
 //! delivered when the target pane polls for them.
 
-use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::Mutex;
+
+/// Largest payload a single queued message may carry.
+///
+/// Queued messages are held in memory until the target pane drains them, so this
+/// bound is what keeps a chatty (or hostile) sender from growing the queue without
+/// limit.
+pub const MAX_MESSAGE_PAYLOAD_BYTES: usize = 1024 * 1024;
+
+/// Global message queue singleton shared across all RMUX panes.
+static GLOBAL_MESSAGE_QUEUE: OnceLock<MessageQueue> = OnceLock::new();
+
+/// Returns the global message queue instance.
+pub fn global_message_queue() -> &'static MessageQueue {
+    GLOBAL_MESSAGE_QUEUE.get_or_init(MessageQueue::new)
+}
 
 /// Unique identifier for a pane within an RMUX session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PaneKey {
-    session_name: String,
-    pane_id: u32,
+pub struct PaneKey {
+    pub(crate) session_name: String,
+    pub(crate) pane_id: u32,
 }
 
 impl PaneKey {
-    fn new(session_name: String, pane_id: u32) -> Self {
-        Self { session_name, pane_id }
+    pub(crate) fn new(session_name: String, pane_id: u32) -> Self {
+        Self {
+            session_name,
+            pane_id,
+        }
     }
 }
 
 /// A message queued for delivery to a pane.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct QueuedMessage {
     pub from_pane_id: u32,
     pub payload: Vec<u8>,
-    pub timestamp: std::time::Instant,
+    pub timestamp_nanos: u128,
 }
 
 /// Information about a peer pane in the same session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PeerInfo {
     pub pane_id: u32,
     pub session_name: String,
@@ -98,13 +117,23 @@ impl MessageQueue {
 
     /// Queues a message for delivery to a target pane.
     ///
-    /// Returns an error if the target pane is not registered.
+    /// Returns an error if the target pane is not registered, or if the payload
+    /// exceeds [`MAX_MESSAGE_PAYLOAD_BYTES`].
     pub fn queue_message(
         &self,
         target: PaneKey,
         from_pane_id: u32,
         payload: Vec<u8>,
     ) -> Result<(), QueueError> {
+        // Enforced here rather than in a caller because this is the single choke
+        // point every sender goes through: the in-process `RmuxPeer` API and the
+        // local-control `service::send_message` path both land on it. Messages sit
+        // in memory until the target pane polls for them, so an unbounded payload
+        // from a local-control client would grow this queue without limit.
+        if payload.len() > MAX_MESSAGE_PAYLOAD_BYTES {
+            return Err(QueueError::PayloadTooLarge);
+        }
+
         let mut inner = self.inner.lock();
         if !inner.known_panes.contains_key(&target) {
             return Err(QueueError::TargetPaneNotFound);
@@ -116,7 +145,10 @@ impl MessageQueue {
             .push(QueuedMessage {
                 from_pane_id,
                 payload,
-                timestamp: std::time::Instant::now(),
+                timestamp_nanos: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
             });
         Ok(())
     }
@@ -159,15 +191,13 @@ impl std::error::Error for QueueError {}
 /// Peer communication handle for an RMUX pane.
 pub struct RmuxPeer {
     key: PaneKey,
-    queue: MessageQueue,
 }
 
 impl RmuxPeer {
-    /// Creates a new peer handle.
-    pub fn new(session_name: String, pane_id: u32, queue: MessageQueue) -> Self {
+    /// Creates a new peer handle using the global message queue.
+    pub fn new(session_name: String, pane_id: u32) -> Self {
         Self {
             key: PaneKey::new(session_name, pane_id),
-            queue,
         }
     }
 
@@ -178,38 +208,12 @@ impl RmuxPeer {
             session_name: self.key.session_name.clone(),
             is_active: true,
         };
-        self.queue.register_pane(self.key.clone(), info);
+        global_message_queue().register_pane(self.key.clone(), info);
     }
 
     /// Unregisters this pane from peer discovery.
     pub fn unregister(&self) {
-        self.queue.unregister_pane(&self.key);
-    }
-
-    /// Lists all peers in the same session.
-    pub fn list_peers(&self) -> Vec<PeerInfo> {
-        self.queue.list_peers(&self.key.session_name)
-    }
-
-    /// Queues a message for delivery to another pane in the same session.
-    pub fn send_message(&self, target_pane_id: u32, payload: Vec<u8>) -> Result<(), QueueError> {
-        const MAX_PAYLOAD_SIZE: usize = 1024 * 1024; // 1MB limit
-        if payload.len() > MAX_PAYLOAD_SIZE {
-            return Err(QueueError::PayloadTooLarge);
-        }
-
-        let target = PaneKey::new(self.key.session_name.clone(), target_pane_id);
-        self.queue.queue_message(target, self.key.pane_id, payload)
-    }
-
-    /// Retrieves pending messages for this pane.
-    pub fn drain_messages(&self) -> Vec<QueuedMessage> {
-        self.queue.drain_messages(&self.key)
-    }
-
-    /// Returns the number of pending messages for this pane.
-    pub fn pending_count(&self) -> usize {
-        self.queue.pending_count(&self.key)
+        global_message_queue().unregister_pane(&self.key);
     }
 }
 
@@ -217,62 +221,110 @@ impl RmuxPeer {
 mod tests {
     use super::*;
 
+    // The message queue is a process-wide singleton and cargo runs these tests in
+    // parallel threads inside one process, so a shared session name would let the
+    // tests observe each other's peer registrations. Each test gets its own.
+    const REGISTER_SESSION: &str = "peer-tests-register";
+    const SEND_DRAIN_SESSION: &str = "peer-tests-send-drain";
+    const UNREGISTERED_SESSION: &str = "peer-tests-unregistered";
+    const TOO_LARGE_SESSION: &str = "peer-tests-too-large";
+    const AT_LIMIT_SESSION: &str = "peer-tests-at-limit";
+    const SERVICE_LIMIT_SESSION: &str = "peer-tests-service-limit";
+
     #[test]
     fn test_message_queue_register_unregister() {
-        let queue = MessageQueue::new();
-        let sender = RmuxPeer::new("session".to_string(), 1, queue.clone());
-        let receiver = RmuxPeer::new("session".to_string(), 2, queue.clone());
+        let sender = RmuxPeer::new(REGISTER_SESSION.to_string(), 1);
+        let receiver = RmuxPeer::new(REGISTER_SESSION.to_string(), 2);
 
         sender.register();
         receiver.register();
 
-        assert_eq!(queue.list_peers("session").len(), 2);
+        assert_eq!(global_message_queue().list_peers(REGISTER_SESSION).len(), 2);
 
         sender.unregister();
         receiver.unregister();
 
-        assert_eq!(queue.list_peers("session").len(), 0);
+        assert_eq!(global_message_queue().list_peers(REGISTER_SESSION).len(), 0);
     }
 
     #[test]
-    fn test_peer_send_drain() {
-        let queue = MessageQueue::new();
-        let sender = RmuxPeer::new("session".to_string(), 1, queue.clone());
-        let receiver = RmuxPeer::new("session".to_string(), 2, queue.clone());
+    fn test_queue_send_drain() {
+        let sender = RmuxPeer::new(SEND_DRAIN_SESSION.to_string(), 1);
+        let receiver = RmuxPeer::new(SEND_DRAIN_SESSION.to_string(), 2);
 
         sender.register();
         receiver.register();
 
-        sender.send_message(2, b"test message".to_vec()).unwrap();
+        let target_key = PaneKey::new(SEND_DRAIN_SESSION.to_string(), 2);
+        global_message_queue()
+            .queue_message(target_key, 1, b"test message".to_vec())
+            .unwrap();
 
-        assert_eq!(receiver.pending_count(), 1);
-        let messages = receiver.drain_messages();
+        let receiver_key = PaneKey::new(SEND_DRAIN_SESSION.to_string(), 2);
+        assert_eq!(global_message_queue().pending_count(&receiver_key), 1);
+        let messages = global_message_queue().drain_messages(&receiver_key);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].payload, b"test message");
+        assert!(messages[0].timestamp_nanos > 0);
     }
 
     #[test]
-    fn test_peer_send_to_unregistered() {
-        let queue = MessageQueue::new();
-        let sender = RmuxPeer::new("session".to_string(), 1, queue.clone());
+    fn test_queue_send_to_unregistered() {
+        let sender = RmuxPeer::new(UNREGISTERED_SESSION.to_string(), 1);
 
         sender.register();
 
-        let result = sender.send_message(999, b"test".to_vec());
+        let target_key = PaneKey::new(UNREGISTERED_SESSION.to_string(), 999);
+        let result = global_message_queue().queue_message(target_key, 1, b"test".to_vec());
         assert_eq!(result, Err(QueueError::TargetPaneNotFound));
     }
 
     #[test]
-    fn test_peer_payload_too_large() {
-        let queue = MessageQueue::new();
-        let sender = RmuxPeer::new("session".to_string(), 1, queue.clone());
-        let receiver = RmuxPeer::new("session".to_string(), 2, queue.clone());
+    fn test_queue_payload_too_large() {
+        let sender = RmuxPeer::new(TOO_LARGE_SESSION.to_string(), 1);
+        let receiver = RmuxPeer::new(TOO_LARGE_SESSION.to_string(), 2);
 
         sender.register();
         receiver.register();
 
-        let large_payload = vec![0u8; 1024 * 1024 + 1]; // 1MB + 1 byte
-        let result = sender.send_message(2, large_payload);
+        let target_key = PaneKey::new(TOO_LARGE_SESSION.to_string(), 2);
+        let large_payload = vec![0u8; MAX_MESSAGE_PAYLOAD_BYTES + 1];
+        let result = global_message_queue().queue_message(target_key, 1, large_payload);
         assert_eq!(result, Err(QueueError::PayloadTooLarge));
+    }
+
+    #[test]
+    fn test_queue_accepts_payload_at_limit() {
+        let sender = RmuxPeer::new(AT_LIMIT_SESSION.to_string(), 1);
+        let receiver = RmuxPeer::new(AT_LIMIT_SESSION.to_string(), 2);
+
+        sender.register();
+        receiver.register();
+
+        // The bound is inclusive, so exactly the limit must still be accepted;
+        // asserting only the over-limit case would pass for an off-by-one that
+        // rejects the largest legal message.
+        let target_key = PaneKey::new(AT_LIMIT_SESSION.to_string(), 2);
+        let payload = vec![0u8; MAX_MESSAGE_PAYLOAD_BYTES];
+        assert_eq!(
+            global_message_queue().queue_message(target_key, 1, payload),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_service_send_enforces_payload_limit() {
+        // service::send_message is the local-control entry point and does not go
+        // through RmuxPeer, so it needs its own proof that the bound applies.
+        let receiver = RmuxPeer::new(SERVICE_LIMIT_SESSION.to_string(), 2);
+        receiver.register();
+
+        let too_large = vec![0u8; MAX_MESSAGE_PAYLOAD_BYTES + 1];
+        let result = crate::terminal::rmux::service::send_message(
+            SERVICE_LIMIT_SESSION.to_string(),
+            2,
+            too_large,
+        );
+        assert_eq!(result, Err(QueueError::PayloadTooLarge.to_string()));
     }
 }

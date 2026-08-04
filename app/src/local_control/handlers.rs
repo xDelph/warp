@@ -8,6 +8,7 @@ pub(super) mod layout;
 pub(super) mod metadata;
 pub(super) mod metadata_config;
 pub(super) mod panes;
+pub(super) mod rmux;
 pub(super) mod settings_surfaces;
 
 /// Standard acknowledgement payload shared by mutation handlers.

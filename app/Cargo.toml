@@ -525,6 +525,7 @@ default = [
     "shell_selector",
     "minimalist_ui",
     "avatar_in_tab_bar",
+    "rmux_native_pane",
     "full_screen_zen_mode",
     "workflow_aliases",
     "ligatures",

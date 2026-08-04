@@ -10,8 +10,8 @@ use warp_errors::report_error;
 use warp_graphql::object_permissions::OwnerType;
 use warpui_core::{AppContext, Entity, SingletonEntity};
 
-use super::UserUid;
 use super::anonymous_id::get_or_create_anonymous_id;
+use super::{API_KEY_PREFIX, UserUid};
 use super::credentials::Credentials;
 #[cfg(any(not(target_family = "wasm"), test, feature = "test-util"))]
 use super::user::UserMetadata;
@@ -113,10 +113,11 @@ impl AuthState {
 
     /// Creates and initializes auth state. Checks, in order:
     /// 1. Test user (test/integration/skip_login builds)
-    /// 2. WARP_USER_SECRET environment variable
-    /// 3. Persisted user from secure storage
+    /// 2. Provided API key
+    /// 3. WARP_USER_SECRET environment variable
+    /// 4. Persisted user from secure storage
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
-    pub fn initialize(ctx: &AppContext) -> Self {
+    pub fn initialize(ctx: &AppContext, api_key: Option<String>) -> Self {
         let state = Self::new(ctx);
 
         if Self::should_use_test_user() {
@@ -128,6 +129,20 @@ impl AuthState {
                 feature = "test-util"
             ))]
             state.set_credentials(Some(Self::test_credentials()));
+            return state;
+        }
+
+        if let Some(api_key_value) = api_key {
+            log::info!("Authenticating via API key");
+            let formatted = if api_key_value.starts_with(API_KEY_PREFIX) {
+                api_key_value
+            } else {
+                format!("{API_KEY_PREFIX}{api_key_value}")
+            };
+            state.set_credentials(Some(Credentials::ApiKey {
+                key: formatted,
+                owner_type: None,
+            }));
             return state;
         }
 

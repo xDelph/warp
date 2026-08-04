@@ -106,3 +106,61 @@ fn test_code_pane_snapshot_with_multiple_tabs() {
     assert_eq!(tabs[2].path, None);
     assert!(matches!(source, Some(CodeSource::Link { .. })));
 }
+
+#[test]
+fn test_rmux_terminal_pane_is_persisted() {
+    let rmux_leaf = LeafContents::RmuxTerminal(RmuxTerminalPaneSnapshot {
+        uuid: vec![1, 2, 3, 4],
+        session_name: "shell-1".to_string(),
+        pane_id: Some(1),
+        cwd: Some("/tmp".to_string()),
+        warp_created: true,
+    });
+    assert!(rmux_leaf.is_persisted());
+}
+
+#[test]
+fn test_network_log_is_not_persisted() {
+    let network_log = LeafContents::NetworkLog;
+    assert!(!network_log.is_persisted());
+}
+
+#[test]
+fn test_environment_management_is_not_persisted() {
+    let env_mgmt = LeafContents::EnvironmentManagement(EnvironmentManagementPaneSnapshot {
+        uuid: vec![1, 2, 3],
+    });
+    assert!(!env_mgmt.is_persisted());
+}
+
+#[test]
+fn test_terminal_pane_is_persisted() {
+    let terminal = LeafContents::Terminal(TerminalPaneSnapshot {
+        uuid: vec![1, 2, 3],
+        cwd: Some("/tmp".to_string()),
+        shell_launch_data: None,
+        is_active: true,
+        is_read_only: false,
+        input_config: None,
+        llm_model_override: None,
+        active_profile_id: None,
+        conversation_ids_to_restore: vec![],
+        active_conversation_id: None,
+    });
+    assert!(terminal.is_persisted());
+}
+
+#[test]
+fn test_rmux_terminal_snapshot_fields() {
+    let snapshot = RmuxTerminalPaneSnapshot {
+        uuid: vec![1, 2, 3, 4],
+        session_name: "codex-1".to_string(),
+        pane_id: Some(42),
+        cwd: Some("/home/user".to_string()),
+        warp_created: true,
+    };
+    assert_eq!(snapshot.session_name, "codex-1");
+    assert_eq!(snapshot.pane_id, Some(42));
+    assert_eq!(snapshot.cwd, Some("/home/user".to_string()));
+    assert!(snapshot.warp_created);
+}

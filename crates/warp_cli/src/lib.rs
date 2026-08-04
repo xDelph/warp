@@ -528,6 +528,11 @@ pub enum WorkerCommand {
     #[clap(hide = true)]
     RemoteServerDaemon(RemoteServerIdentityArgs),
 
+    /// Run the RMUX daemon for local RMUX sessions.
+    /// Binds rmux-server to a local Unix socket and stays alive after GUI exit.
+    #[clap(hide = true)]
+    RmuxDaemon,
+
     /// Run a headless ripgrep search worker.
     #[cfg(not(target_family = "wasm"))]
     #[clap(hide = true)]
