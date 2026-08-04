@@ -11,11 +11,16 @@
 //! [`crate::terminal::TerminalManager`] / `TerminalView` pane UX.
 
 mod client;
+mod daemon;
 mod event_loop;
 mod grid;
 mod input;
+mod local_control;
+mod peer;
 mod terminal_manager;
 mod types;
 
+pub use daemon::ensure_embedded_daemon;
+pub use peer::{MessageQueue, PeerInfo, QueuedMessage, QueueError, RmuxPeer};
 pub use terminal_manager::RmuxTerminalManager;
 pub use types::{RmuxPaneOwnership, RmuxPaneSpec};

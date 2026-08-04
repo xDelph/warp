@@ -35,6 +35,21 @@ struct CachedModel {
     name: String,
 }
 
+/// acpx-compatible model cache interface
+pub struct ModelCache;
+
+impl ModelCache {
+    /// Try to get cached models for a harness (acpx pattern)
+    pub fn try_get_cached_models(harness: Harness) -> Option<Vec<LocalAcpModelInfo>> {
+        load_fresh(harness)
+    }
+
+    /// Cache models for a harness (acpx pattern)
+    pub fn cache_models(harness: Harness, models: Vec<LocalAcpModelInfo>) {
+        store(harness, &models);
+    }
+}
+
 fn cache_path() -> PathBuf {
     warp_core::paths::state_dir().join(CACHE_FILE_NAME)
 }

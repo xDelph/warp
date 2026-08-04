@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use acpx::RuntimeContext;
 use agent_client_protocol as acp;
 use anyhow::{anyhow, Context, Result};
 use async_process::Command;
@@ -15,6 +14,9 @@ pub(crate) struct LocalAcpModelInfo {
     pub(crate) id: String,
     pub(crate) name: String,
 }
+
+/// Cache duration for model discovery results (matches acpx's 24h default)
+const MODEL_CACHE_DURATION: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub(crate) fn default_models_for_harness(harness: Harness) -> Vec<LocalAcpModelInfo> {
     registry::spec_for_harness(harness)
@@ -44,10 +46,19 @@ const MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(60);
 /// for such an update before concluding the agent exposes no models.
 const CONFIG_OPTION_UPDATE_WAIT: Duration = Duration::from_secs(6);
 
+/// Enhanced model discovery that follows official ACP SDK patterns.
+/// Uses agent-client-protocol's AcpAgent to spawn agents from the registry.
 pub(crate) async fn discover_models_for_harness(
     harness: Harness,
 ) -> Result<Vec<LocalAcpModelInfo>> {
-    log::debug!("discovering ACP models for {harness}");
+    log::debug!("discovering ACP models for {harness} (official SDK)");
+    
+    // Check cache first if available
+    if let Some(cached_models) = super::model_cache::ModelCache::try_get_cached_models(harness) {
+        log::debug!("using cached models for {harness}: {} models", cached_models.len());
+        return Ok(cached_models);
+    }
+    
     let result = tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -71,7 +82,13 @@ pub(crate) async fn discover_models_for_harness(
     .context("local ACP model discovery runtime task panicked")?;
 
     match &result {
-        Ok(models) => log::debug!("discovered {} ACP models for {harness}", models.len()),
+        Ok(models) => {
+            log::debug!("discovered {} ACP models for {harness}", models.len());
+            // Cache the results
+            if !models.is_empty() {
+                super::model_cache::ModelCache::cache_models(harness, models.clone());
+            }
+        }
         Err(error) => log::debug!("failed to discover ACP models for {harness}: {error:#}"),
     }
     result
@@ -95,10 +112,7 @@ async fn discover_models_on_local_runtime(harness: Harness) -> Result<Vec<LocalA
         command.env(key, value);
     }
 
-    let runtime = RuntimeContext::new(|task| {
-        tokio::task::spawn_local(task);
-    });
-    let connection = Connection::spawn(&mut command, &runtime)?;
+    let connection = Connection::spawn(&mut command)?;
     let initialize_result = connection
         .initialize(super::connection::initialize_request())
         .await?;

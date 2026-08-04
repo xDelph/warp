@@ -4,6 +4,8 @@
 
 use async_trait::async_trait;
 use rmux_sdk::{PaneSnapshot, Result as RmuxResult, TerminalSizeSpec};
+use rmux_server::ServerHandle;
+use std::sync::Arc;
 
 use super::input::RmuxInputAction;
 
@@ -51,6 +53,8 @@ pub trait RmuxPaneClient: Send + Sync {
 pub struct RmuxSdkPaneClient {
     pane: rmux_sdk::Pane,
     render_stream: tokio::sync::Mutex<Option<rmux_sdk::PaneRenderStream>>,
+    /// Optional daemon handle for Warp-owned panes; keeps embedded daemon alive.
+    _daemon_handle: Option<Arc<ServerHandle>>,
 }
 
 impl RmuxSdkPaneClient {
@@ -58,6 +62,15 @@ impl RmuxSdkPaneClient {
         Self {
             pane,
             render_stream: tokio::sync::Mutex::new(None),
+            _daemon_handle: None,
+        }
+    }
+
+    pub fn with_daemon_handle(pane: rmux_sdk::Pane, daemon_handle: Arc<ServerHandle>) -> Self {
+        Self {
+            pane,
+            render_stream: tokio::sync::Mutex::new(None),
+            _daemon_handle: Some(daemon_handle),
         }
     }
 }
@@ -115,8 +128,16 @@ impl RmuxPaneClient for RmuxSdkPaneClient {
 /// through [`connect_rmux_pane_by_id`] instead.
 pub async fn connect_rmux_pane(
     spec: super::types::RmuxPaneSpec,
-) -> anyhow::Result<std::sync::Arc<dyn RmuxPaneClient>> {
+) -> anyhow::Result<(std::sync::Arc<dyn RmuxPaneClient>, Option<u32>)> {
     use anyhow::Context as _;
+
+    // For Warp-owned panes, ensure embedded daemon is started before connecting
+    let daemon_handle = if matches!(spec.ownership, super::types::RmuxPaneOwnership::WarpCreated) {
+        Some(super::daemon::ensure_embedded_daemon().await
+            .context("failed to start embedded RMUX daemon")?)
+    } else {
+        None
+    };
 
     let rmux = rmux_sdk::Rmux::builder()
         .connect_or_start()
@@ -137,9 +158,33 @@ pub async fn connect_rmux_pane(
         .ensure_session(ensure)
         .await
         .context("ensure rmux session")?;
-    let pane = session.pane(0, 0);
+    
+    let pane = match spec.pane_id {
+        Some(pane_id) => session
+            .pane_by_id(rmux_sdk::PaneId::from(pane_id))
+            .await
+            .with_context(|| {
+                format!(
+                    "reattach to rmux pane {pane_id} in session {}",
+                    spec.session_name
+                )
+            })?,
+        None => session.pane(0, 0),
+    };
 
-    Ok(std::sync::Arc::new(RmuxSdkPaneClient::new(pane)))
+    // Capture the pane_id for persistence if this is a new pane
+    let captured_pane_id = if spec.pane_id.is_none() {
+        Some(pane.id().into())
+    } else {
+        spec.pane_id
+    };
+
+    let client = match daemon_handle {
+        Some(handle) => RmuxSdkPaneClient::with_daemon_handle(pane, handle),
+        None => RmuxSdkPaneClient::new(pane),
+    };
+
+    Ok((std::sync::Arc::new(client), captured_pane_id))
 }
 
 #[cfg(any(test, feature = "test-util"))]

@@ -1059,9 +1059,9 @@ impl Session {
 
     /// The ControlMaster socket path for a legacy-SSH-wrapper session, if any.
     pub fn legacy_ssh_socket_path(&self) -> Option<&std::path::Path> {
-        match &self.info.is_legacy_ssh_session {
-            IsLegacySSHSession::Yes { socket_path, .. } => Some(socket_path.as_path()),
-            IsLegacySSHSession::No => None,
+        match &self.info.is_ssh_wrapper_session {
+            IsSSHWrapperSession::Yes { socket_path, .. } => Some(socket_path.as_path()),
+            IsSSHWrapperSession::No => None,
         }
     }
 

@@ -138,6 +138,43 @@ pub struct QueryParams {
     pub query: Option<String>,
 }
 
+/// Parameters for sending a message to an RMUX peer pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RmuxMessageSend {
+    pub target_pane_id: u32,
+    pub payload: Vec<u8>,
+}
+
+/// Response for RMUX peer list action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RmuxPeerListResponse {
+    pub action: &'static str,
+    pub peers: Vec<RmuxPeerInfo>,
+}
+
+/// Information about an RMUX peer pane.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RmuxPeerInfo {
+    pub pane_id: u32,
+    pub session_name: String,
+    pub is_active: bool,
+}
+
+/// Response for RMUX message drain action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RmuxMessageDrainResponse {
+    pub action: &'static str,
+    pub messages: Vec<RmuxQueuedMessage>,
+}
+
+/// A queued message from an RMUX peer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RmuxQueuedMessage {
+    pub from_pane_id: u32,
+    pub payload: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RenameParams {

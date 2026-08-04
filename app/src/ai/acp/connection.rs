@@ -1,18 +1,20 @@
 //! Warp's ACP connection wrapper.
 //!
-//! Based on `acpx` but auto-approves `session/request_permission` so local agents
-//! can run tools without blocking on a client that doesn't implement the UI yet.
+//! Based on the official agent-client-protocol SDK but auto-approves
+//! `session/request_permission` so local agents can run tools without blocking
+//! on a client that doesn't implement the UI yet.
 
 use std::cell::RefCell;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-use acpx::{Error, Result, RuntimeContext};
-use agent_client_protocol::{self as acp, Agent as _};
+use agent_client_protocol as acp;
+use anyhow::{anyhow, Result};
 use async_fs;
 use async_process::{Child, Command, Stdio};
 use futures::channel::{mpsc, oneshot};
+use acp::Agent as _;
 
 #[derive(Clone, Debug, Default)]
 struct SessionUpdateBroadcaster {
@@ -136,32 +138,34 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
-    pub(crate) fn spawn(command: &mut Command, runtime: &RuntimeContext) -> Result<Self> {
+    pub(crate) fn spawn(command: &mut Command) -> Result<Self> {
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.kill_on_drop(true);
 
         let mut child = command
             .spawn()
-            .map_err(|source| Error::SpawnProcess { source })?;
-        let outgoing = child.stdin.take().ok_or(Error::MissingChildStdin)?;
-        let incoming = child.stdout.take().ok_or(Error::MissingChildStdout)?;
+            .map_err(|source| anyhow::anyhow!("Failed to spawn process: {source}"))?;
+        let outgoing = child.stdin.take().ok_or_else(|| anyhow!("Missing child stdin"))?;
+        let incoming = child.stdout.take().ok_or_else(|| anyhow!("Missing child stdout"))?;
         let session_updates = SessionUpdateBroadcaster::default();
         let cwd = command
             .get_current_dir()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
         let client = ConnectionClient::new(session_updates.clone(), cwd);
-        let runtime_for_sdk = runtime.clone();
-        let (connection, io_task) =
-            acp::ClientSideConnection::new(client, outgoing, incoming, move |task| {
-                runtime_for_sdk.spawn_local(task);
-            });
+        
+        let (connection, io_task) = acp::ClientSideConnection::new(
+            client, 
+            outgoing, 
+            incoming, 
+            |task| { tokio::task::spawn_local(task); }
+        );
         let connection = Rc::new(connection);
         let (io_task_tx, io_task_rx) = oneshot::channel();
 
-        runtime.spawn(async move {
-            let _ = io_task_tx.send(io_task.await.map_err(Error::from));
+        tokio::spawn(async move {
+            let _ = io_task_tx.send(io_task.await.map_err(|e| anyhow::anyhow!("IO task error: {e}")));
         });
 
         Ok(Self {
@@ -196,7 +200,7 @@ impl Connection {
             match child.kill() {
                 Ok(()) => {}
                 Err(source) if source.kind() == ErrorKind::InvalidInput => {}
-                Err(source) => return Err(Error::KillProcess { source }),
+                Err(source) => return Err(anyhow!("Failed to kill process: {source}")),
             }
         }
 
@@ -204,7 +208,7 @@ impl Connection {
             child
                 .status()
                 .await
-                .map_err(|source| Error::WaitForProcess { source })?;
+                .map_err(|source| anyhow!("Failed to wait for process: {source}"))?;
         }
 
         if let Some(io_task) = io_task {
@@ -227,7 +231,7 @@ impl Connection {
         self.connection()?
             .initialize(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Initialize failed: {e}"))
     }
 
     pub(crate) async fn authenticate(
@@ -237,7 +241,7 @@ impl Connection {
         self.connection()?
             .authenticate(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Authenticate failed: {e}"))
     }
 
     pub(crate) async fn new_session(
@@ -247,7 +251,7 @@ impl Connection {
         self.connection()?
             .new_session(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("New session failed: {e}"))
     }
 
     pub(crate) async fn set_session_mode(
@@ -257,11 +261,14 @@ impl Connection {
         self.connection()?
             .set_session_mode(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Set session mode failed: {e}"))
     }
 
     pub(crate) async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse> {
-        self.connection()?.prompt(args).await.map_err(Error::from)
+        self.connection()?
+            .prompt(args)
+            .await
+            .map_err(|e| anyhow!("Prompt failed: {e}"))
     }
 
     pub(crate) async fn set_session_config_option(
@@ -271,7 +278,7 @@ impl Connection {
         self.connection()?
             .set_session_config_option(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Set session config option failed: {e}"))
     }
 
     pub(crate) async fn set_session_model(
@@ -281,18 +288,18 @@ impl Connection {
         self.connection()?
             .set_session_model(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Set session model failed: {e}"))
     }
 
     pub(crate) async fn ext_method(&self, args: acp::ExtRequest) -> Result<acp::ExtResponse> {
         self.connection()?
             .ext_method(args)
             .await
-            .map_err(Error::from)
+            .map_err(|e| anyhow!("Ext method failed: {e}"))
     }
 
     fn connection(&self) -> Result<Rc<acp::ClientSideConnection>> {
-        self.state.borrow().connection.clone().ok_or(Error::Closed)
+        self.state.borrow().connection.clone().ok_or_else(|| anyhow!("Connection closed"))
     }
 }
 

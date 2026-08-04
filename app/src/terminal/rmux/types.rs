@@ -43,6 +43,9 @@ pub struct RmuxPaneSpec {
     pub cwd: Option<String>,
     /// Whether Warp should own the resulting pane's lifecycle.
     pub ownership: RmuxPaneOwnership,
+    /// Stable RMUX pane id for restoration. None re-attaches to whichever pane
+    /// is currently active in the session.
+    pub pane_id: Option<u32>,
 }
 
 impl RmuxPaneSpec {
@@ -51,12 +54,19 @@ impl RmuxPaneSpec {
             session_name: session_name.into(),
             cwd: None,
             ownership,
+            pane_id: None,
         }
     }
 
     #[must_use]
     pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_pane_id(mut self, pane_id: u32) -> Self {
+        self.pane_id = Some(pane_id);
         self
     }
 }
@@ -72,6 +82,7 @@ impl RmuxPaneSpec {
             RmuxPaneOwnership::from_warp_created(snapshot.warp_created),
         );
         spec.cwd = snapshot.cwd.clone();
+        spec.pane_id = snapshot.pane_id;
         spec
     }
 }

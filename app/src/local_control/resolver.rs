@@ -38,9 +38,16 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionParameterSpec::BooleanValue => parse_params::<BooleanValueParams>(action),
         ActionParameterSpec::ColorValue => parse_params::<ColorValueParams>(action),
         ActionParameterSpec::Direction => parse_params::<DirectionParams>(action),
+        ActionParameterSpec::DriveObjectCreate => parse_params::<EmptyParams>(action),
+        ActionParameterSpec::DriveObjectId => parse_params::<KeyParams>(action),
+        ActionParameterSpec::DriveObjectInsert => parse_params::<EmptyParams>(action),
+        ActionParameterSpec::DriveObjectList => parse_params::<EmptyParams>(action),
+        ActionParameterSpec::DriveObjectUpdate => parse_params::<EmptyParams>(action),
         ActionParameterSpec::FileOpen => parse_params::<FileOpenParams>(action),
+        ActionParameterSpec::InputMode => parse_params::<EmptyParams>(action),
         ActionParameterSpec::Key => parse_params::<KeyParams>(action),
         ActionParameterSpec::KeyValue => parse_params::<KeyValueParams>(action),
+        ActionParameterSpec::Limit => parse_params::<EmptyParams>(action),
         ActionParameterSpec::Namespace => parse_params::<NamespaceParams>(action),
         ActionParameterSpec::PageQuery => parse_params::<PageQueryParams>(action),
         ActionParameterSpec::Query => parse_params::<QueryParams>(action),
@@ -51,6 +58,7 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionParameterSpec::TabCreate => parse_params::<TabCreateParams>(action),
         ActionParameterSpec::Text => parse_params::<TextParams>(action),
         ActionParameterSpec::ThemeName => parse_params::<ThemeNameParams>(action),
+        ActionParameterSpec::WorkflowRun => parse_params::<EmptyParams>(action),
     }
 }
 
@@ -68,7 +76,11 @@ pub(crate) fn validate_action_target(
         | TargetScope::Settings
         | TargetScope::Keybinding
         | TargetScope::Action
-        | TargetScope::Capability => true,
+        | TargetScope::Capability
+        | TargetScope::Block
+        | TargetScope::History
+        | TargetScope::DriveObject
+        | TargetScope::Auth => true,
         TargetScope::Window
         | TargetScope::Tab
         | TargetScope::Pane

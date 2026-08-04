@@ -90,6 +90,9 @@ pub mod cli_agent;
 pub use cli_agent::CLIAgent;
 pub(crate) mod cli_agent_sessions;
 
+pub mod pane_allocator;
+pub use pane_allocator::{global_allocator, PaneNameAllocator};
+
 pub use block_list_settings::*;
 pub use mock_terminal_manager::MockTerminalManager;
 use model_events::{ModelEvent, ModelEventDispatcher};

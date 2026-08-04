@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread;
 
-use acpx::RuntimeContext;
 use anyhow::{anyhow, Context, Result};
 use async_process::Command;
 use futures::StreamExt;
@@ -424,10 +423,7 @@ async fn start_local_acp_session(
     };
     configure_process_env(&mut command, harness, gemini_api_key);
 
-    let runtime = RuntimeContext::new(|task| {
-        tokio::task::spawn_local(task);
-    });
-    let connection = Connection::spawn(&mut command, &runtime)?;
+    let connection = Connection::spawn(&mut command)?;
     let initialize_result = connection
         .initialize(super::connection::initialize_request())
         .await?;

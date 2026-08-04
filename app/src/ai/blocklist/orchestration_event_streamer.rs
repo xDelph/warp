@@ -1567,7 +1567,7 @@ impl OrchestrationEventStreamer {
             let Some(sse) = entry.sse_connection.as_mut() else {
                 return;
             };
-            while let Ok(Some(item)) = sse.event_receiver.try_next() {
+            while let Ok(item) = sse.event_receiver.try_recv() {
                 if item.event.sequence > cursor {
                     events.push(item.event);
                 }
@@ -2600,7 +2600,7 @@ impl OrchestrationEventStreamer {
                 return;
             };
 
-            while let Ok(Some(item)) = sse.event_receiver.try_next() {
+            while let Ok(item) = sse.event_receiver.try_recv() {
                 // Deduplicate: discard events at or below the cursor.
                 if item.event.sequence > cursor {
                     if let Some(msg) = item.fetched_message {

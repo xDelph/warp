@@ -66,7 +66,7 @@ impl LocalAcpTeamModel {
         // cleared from its terminal view so teams never accumulate stale
         // members or leak their terminal view handles.
         let history_handle = BlocklistAIHistoryModel::handle(ctx);
-        ctx.subscribe_to_model(&history_handle, |this, event, _ctx| {
+        ctx.subscribe_to_model(&history_handle, |this, _handle, event, _ctx| {
             this.handle_history_event(event);
         });
         Self::default()
@@ -80,7 +80,7 @@ impl LocalAcpTeamModel {
             | BlocklistAIHistoryEvent::DeletedConversation {
                 conversation_id, ..
             } => self.drop_conversation(*conversation_id),
-            BlocklistAIHistoryEvent::ClearedConversationsInTerminalView {
+            BlocklistAIHistoryEvent::ClearedConversationsForTerminalSurface {
                 cleared_conversation_ids,
                 ..
             } => {

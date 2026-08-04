@@ -18,7 +18,9 @@ use warpui::{AppContext, ModelHandle, ViewHandle, WindowId};
 use super::client::RmuxPaneClient;
 use super::event_loop::{EventLoop, RmuxEventLoopMessage};
 use super::input::map_pty_bytes_to_rmux_input;
+use super::peer::MessageQueue;
 use super::types::{RmuxPaneOwnership, RmuxPaneSpec};
+use crate::terminal::pane_allocator;
 use crate::context_chips::prompt_type::PromptType;
 use crate::pane_group::pane::DetachType;
 use crate::pane_group::TerminalViewResources;
@@ -27,7 +29,17 @@ use crate::terminal::event_listener::ChannelEventListener;
 use crate::terminal::model::session::Sessions;
 use crate::terminal::model_events::ModelEventDispatcher;
 use crate::terminal::shell::{ShellName, ShellType};
-use crate::terminal::{self as terminal_module, terminal_manager, ShellLaunchState, TerminalModel, TerminalView};
+use crate::terminal::{
+    self as terminal_module, terminal_manager, ShellLaunchState, TerminalModel, TerminalView,
+};
+use crate::terminal::terminal_manager::BlockSpacing;
+
+/// Global message queue shared by all RMUX panes for inter-pane communication.
+static MESSAGE_QUEUE: std::sync::OnceLock<MessageQueue> = std::sync::OnceLock::new();
+
+fn message_queue() -> &'static MessageQueue {
+    MESSAGE_QUEUE.get_or_init(MessageQueue::new)
+}
 
 /// [`crate::terminal::TerminalManager`] for a single RMUX-backed pane.
 pub struct RmuxTerminalManager {
@@ -35,9 +47,10 @@ pub struct RmuxTerminalManager {
     view: ViewHandle<TerminalView>,
     event_loop: ModelHandle<EventLoop>,
     message_tx: Sender<RmuxEventLoopMessage>,
-    session_name: String,
+    pub(super) session_name: String,
     cwd: Option<String>,
     ownership: RmuxPaneOwnership,
+    peer: Option<RmuxPeer>,
 }
 
 impl RmuxTerminalManager {
@@ -50,7 +63,7 @@ impl RmuxTerminalManager {
         window_id: WindowId,
         model_event_sender: Option<SyncSender<ModelEvent>>,
         ctx: &mut AppContext,
-    ) -> ModelHandle<Box<dyn terminal_module::TerminalManager>> {
+    ) -> (ViewHandle<TerminalView>, ModelHandle<Box<dyn terminal_module::TerminalManager>>) {
         let ownership = spec.ownership;
         let session_name = spec.session_name.clone();
         let cwd = spec.cwd.clone();
@@ -83,6 +96,7 @@ impl RmuxTerminalManager {
                 display_name: ShellName::blank(),
                 shell_type: ShellType::Zsh,
             },
+            BlockSpacing::for_gui(ctx),
             ctx,
         );
 
@@ -131,28 +145,30 @@ impl RmuxTerminalManager {
 
         let manager = Self {
             model,
-            view,
+            view: view.clone(),
             event_loop,
             message_tx,
             session_name,
             cwd,
             ownership,
+            peer: None,
         };
 
-        ctx.add_model(|_ctx| {
+        let terminal_manager = ctx.add_model(|_ctx| {
             let manager: Box<dyn terminal_module::TerminalManager> = Box::new(manager);
             manager
-        })
+        });
+
+        (view, terminal_manager)
     }
 
-    /// Builds a persistence snapshot for this pane. `pane_id` is left `None`
-    /// in V1: restoring re-attaches to whichever pane is currently active in
-    /// the named session rather than a specific stable pane id.
+    /// Builds a persistence snapshot for this pane.
     pub fn snapshot(&self, uuid: Vec<u8>) -> crate::app_state::RmuxTerminalPaneSnapshot {
+        let pane_id = self.event_loop.as_ref(|event_loop| event_loop.pane_id());
         crate::app_state::RmuxTerminalPaneSnapshot {
             uuid,
             session_name: self.session_name.clone(),
-            pane_id: None,
+            pane_id,
             cwd: self.cwd.clone(),
             warp_created: self.ownership.is_warp_created(),
         }
@@ -194,15 +210,27 @@ impl RmuxTerminalManager {
     fn client(&self, ctx: &AppContext) -> Option<Arc<dyn RmuxPaneClient>> {
         self.event_loop.as_ref(ctx).client()
     }
+
+    /// Returns the peer handle for inter-pane communication.
+    /// Returns None if the pane_id is not yet known.
+    pub fn peer(&mut self) -> Option<RmuxPeer> {
+        if let Some(ref peer) = self.peer {
+            return Some(peer.clone());
+        }
+        // Try to get pane_id from event loop
+        let pane_id = self.event_loop.as_ref(|event_loop| event_loop.pane_id());
+        pane_id.map(|pane_id| {
+            let peer = RmuxPeer::new(self.session_name.clone(), pane_id, message_queue().clone());
+            peer.register();
+            self.peer = Some(peer.clone());
+            peer
+        })
+    }
 }
 
 impl terminal_module::TerminalManager for RmuxTerminalManager {
     fn model(&self) -> Arc<FairMutex<TerminalModel>> {
         self.model.clone()
-    }
-
-    fn view(&self) -> ViewHandle<TerminalView> {
-        self.view.clone()
     }
 
     fn on_view_detached(&self, detach_type: DetachType, app: &mut AppContext) {
@@ -211,6 +239,16 @@ impl terminal_module::TerminalManager for RmuxTerminalManager {
         }
 
         let _ = self.message_tx.try_send(RmuxEventLoopMessage::Shutdown);
+
+        // Unregister from peer communication if peer was created
+        if let Some(peer) = self.peer() {
+            peer.unregister();
+        }
+
+        // Release pane name from allocator if this was a Warp-created pane
+        if matches!(self.ownership, RmuxPaneOwnership::WarpCreated) {
+            pane_allocator::global_allocator().release(&self.session_name);
+        }
 
         let Some(client) = self.client(app) else {
             return;

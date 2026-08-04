@@ -33,6 +33,7 @@ pub(super) struct EventLoop {
     message_rx: Receiver<RmuxEventLoopMessage>,
     weak_view: WeakViewHandle<TerminalView>,
     client: Option<Arc<dyn RmuxPaneClient>>,
+    pane_id: Option<u32>,
 }
 
 impl EventLoop {
@@ -53,6 +54,7 @@ impl EventLoop {
             message_rx,
             weak_view,
             client: None,
+            pane_id: pane_spec.pane_id,
         };
 
         ctx.spawn(connect_rmux_pane(pane_spec), Self::on_connected);
@@ -62,11 +64,18 @@ impl EventLoop {
 
     fn on_connected(
         &mut self,
-        result: anyhow::Result<Arc<dyn RmuxPaneClient>>,
+        result: anyhow::Result<(Arc<dyn RmuxPaneClient>, Option<u32>)>,
         ctx: &mut ModelContext<Self>,
     ) {
         match result {
-            Ok(client) => self.attach_client(client, ctx),
+            Ok((client, pane_id)) => {
+                self.pane_id = pane_id.or(self.pane_id);
+                // Note: Peer registration deferred to avoid complex view->manager wiring
+                // in this event loop. The peer handle is available via RmuxTerminalManager::peer()
+                // once the pane_id is known, but we cannot safely access the manager from here.
+                // For now, peer registration is handled externally if needed.
+                self.attach_client(client, ctx);
+            }
             Err(error) => {
                 log::error!("failed to start RMUX pane: {error:#}");
                 if let Some(view) = self.weak_view.upgrade(ctx) {
@@ -151,6 +160,10 @@ impl EventLoop {
 
     pub(super) fn client(&self) -> Option<Arc<dyn RmuxPaneClient>> {
         self.client.clone()
+    }
+
+    pub(super) fn pane_id(&self) -> Option<u32> {
+        self.pane_id
     }
 }
 

@@ -59,6 +59,7 @@ pub enum ActionParameterSpec {
     Query,
     Rename,
     Resize,
+    RmuxMessageSend,
     TabActivate,
     TabClose,
     TabCreate,
@@ -85,6 +86,8 @@ pub enum ActionResultSpec {
     InstanceMetadata,
     KeybindingList,
     KeybindingMetadata,
+    RmuxPeerList,
+    RmuxMessageDrain,
     SettingList,
     SettingValue,
     SurfaceList,
@@ -347,5 +350,11 @@ define_action_catalog! {
         DriveObjectInsert => { name: "drive.object.insert", status: Stub, target: DriveObject, params: DriveObjectInsert, result: Acknowledgement },
         DriveObjectShareToTeam => { name: "drive.object.share_to_team", status: Stub, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
         DriveWorkflowRun => { name: "drive.workflow.run", status: Stub, target: DriveObject, params: WorkflowRun, result: Acknowledgement },
+    }
+
+    rmux {
+        RmuxPeerList => { name: "rmux.peer.list", status: Implemented, target: Session, params: None, result: RmuxPeerList },
+        RmuxMessageSend => { name: "rmux.message.send", status: Implemented, target: Session, params: RmuxMessageSend, result: Acknowledgement },
+        RmuxMessageDrain => { name: "rmux.message.drain", status: Implemented, target: Session, params: None, result: RmuxMessageDrain },
     }
 }

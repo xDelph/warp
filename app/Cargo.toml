@@ -50,7 +50,6 @@ test = false
 
 [dependencies]
 addr = "0.15.6"
-acpx = { workspace = true, optional = true }
 agent-client-protocol = { workspace = true, optional = true }
 ai.workspace = true
 ai_types.workspace = true
@@ -172,8 +171,9 @@ qrcode.workspace = true
 rand.workspace = true
 rangemap.workspace = true
 rayon.workspace = true
-regex-automata.workspace = true
 rmux-sdk = { version = "0.8", optional = true }
+rmux-server = { version = "0.8", optional = true }
+regex-automata = "0.4.6"
 regex.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
@@ -511,7 +511,7 @@ cross_repo_context = []
 codebase_index_persistence = ["full_source_code_embedding"]
 well_known_mcp_ids = []
 factory_mcp = []
-rmux_native_pane = ["dep:rmux-sdk"]
+rmux_native_pane = ["dep:rmux-sdk", "dep:rmux-server"]
 default = [
     "local_acp",
     "warp_control_cli",
@@ -746,7 +746,7 @@ grep_tool = []
 # For the most part, including GUI code in headless builds is fine; the main use case is
 # for things that pull in external dependencies.
 gui = ["voice_input"]
-local_acp = ["agent_harness", "dep:acpx", "dep:agent-client-protocol"]
+local_acp = ["agent_harness", "dep:agent-client-protocol"]
 nld_classifier_v1 = ["input_classifier/nld_classifier_v1"]
 nld_classifier_v2 = ["input_classifier/nld_classifier_v2"]
 nld_classifier_v3 = ["input_classifier/nld_classifier_v3"]
