@@ -18,7 +18,7 @@ use warpui::{AppContext, ModelHandle, ViewHandle, WindowId};
 use super::client::RmuxPaneClient;
 use super::event_loop::{EventLoop, RmuxEventLoopMessage};
 use super::input::map_pty_bytes_to_rmux_input;
-use super::peer::MessageQueue;
+use super::peer::{MessageQueue, RmuxPeer};
 use super::types::{RmuxPaneOwnership, RmuxPaneSpec};
 use crate::terminal::pane_allocator;
 use crate::context_chips::prompt_type::PromptType;
@@ -34,13 +34,6 @@ use crate::terminal::{
 };
 use crate::terminal::terminal_manager::BlockSpacing;
 
-/// Global message queue shared by all RMUX panes for inter-pane communication.
-static MESSAGE_QUEUE: std::sync::OnceLock<MessageQueue> = std::sync::OnceLock::new();
-
-fn message_queue() -> &'static MessageQueue {
-    MESSAGE_QUEUE.get_or_init(MessageQueue::new)
-}
-
 /// [`crate::terminal::TerminalManager`] for a single RMUX-backed pane.
 pub struct RmuxTerminalManager {
     model: Arc<FairMutex<TerminalModel>>,
@@ -51,6 +44,7 @@ pub struct RmuxTerminalManager {
     cwd: Option<String>,
     ownership: RmuxPaneOwnership,
     peer: Option<RmuxPeer>,
+    message_queue: MessageQueue,
 }
 
 impl RmuxTerminalManager {
@@ -67,6 +61,7 @@ impl RmuxTerminalManager {
         let ownership = spec.ownership;
         let session_name = spec.session_name.clone();
         let cwd = spec.cwd.clone();
+        let message_queue = MessageQueue::new();
 
         let (wakeups_tx, wakeups_rx) = async_channel::unbounded();
         let (events_tx, events_rx) = async_channel::unbounded();
@@ -152,6 +147,7 @@ impl RmuxTerminalManager {
             cwd,
             ownership,
             peer: None,
+            message_queue,
         };
 
         let terminal_manager = ctx.add_model(|_ctx| {
@@ -163,8 +159,8 @@ impl RmuxTerminalManager {
     }
 
     /// Builds a persistence snapshot for this pane.
-    pub fn snapshot(&self, uuid: Vec<u8>) -> crate::app_state::RmuxTerminalPaneSnapshot {
-        let pane_id = self.event_loop.as_ref(|event_loop| event_loop.pane_id());
+    pub fn snapshot(&self, uuid: Vec<u8>, ctx: &AppContext) -> crate::app_state::RmuxTerminalPaneSnapshot {
+        let pane_id = self.event_loop.as_ref(ctx).pane_id();
         crate::app_state::RmuxTerminalPaneSnapshot {
             uuid,
             session_name: self.session_name.clone(),
@@ -211,20 +207,29 @@ impl RmuxTerminalManager {
         self.event_loop.as_ref(ctx).client()
     }
 
-    /// Returns the peer handle for inter-pane communication.
-    /// Returns None if the pane_id is not yet known.
-    pub fn peer(&mut self) -> Option<RmuxPeer> {
-        if let Some(ref peer) = self.peer {
-            return Some(peer.clone());
+    /// Ensures peer is registered if not already.
+    /// Called lazily when peer functionality is needed.
+    fn ensure_peer_registered(&mut self, ctx: &AppContext) {
+        if self.peer.is_some() {
+            return;
         }
-        // Try to get pane_id from event loop
-        let pane_id = self.event_loop.as_ref(|event_loop| event_loop.pane_id());
-        pane_id.map(|pane_id| {
-            let peer = RmuxPeer::new(self.session_name.clone(), pane_id, message_queue().clone());
+
+        if let Some(pane_id) = self.event_loop.as_ref(ctx).pane_id() {
+            let peer = RmuxPeer::new(
+                self.session_name.clone(),
+                pane_id,
+                self.message_queue.clone(),
+            );
             peer.register();
-            self.peer = Some(peer.clone());
-            peer
-        })
+            self.peer = Some(peer);
+            log::info!("Registered RMUX peer: session={}, pane_id={}", self.session_name, pane_id);
+        }
+    }
+
+    /// Returns the peer handle for this pane, registering if needed.
+    pub fn peer(&mut self, ctx: &AppContext) -> Option<&RmuxPeer> {
+        self.ensure_peer_registered(ctx);
+        self.peer.as_ref()
     }
 }
 
@@ -240,8 +245,8 @@ impl terminal_module::TerminalManager for RmuxTerminalManager {
 
         let _ = self.message_tx.try_send(RmuxEventLoopMessage::Shutdown);
 
-        // Unregister from peer communication if peer was created
-        if let Some(peer) = self.peer() {
+        // Unregister peer if registered
+        if let Some(peer) = &self.peer {
             peer.unregister();
         }
 

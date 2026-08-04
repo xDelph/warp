@@ -174,7 +174,7 @@ pub async fn connect_rmux_pane(
 
     // Capture the pane_id for persistence if this is a new pane
     let captured_pane_id = if spec.pane_id.is_none() {
-        Some(pane.id().into())
+        pane.id().await.context("read RMUX pane id")?.map(Into::into)
     } else {
         spec.pane_id
     };

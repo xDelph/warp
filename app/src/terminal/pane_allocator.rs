@@ -136,13 +136,11 @@ impl PaneNameAllocator {
 ///
 /// Returns None if the name doesn't match the "base-N" pattern.
 fn parse_pane_name(name: &str) -> Option<(String, u32)> {
-    let parts: Vec<&str> = name.rsplitn(2, '-').collect();
-    if parts.len() == 2 {
-        if let Ok(suffix) = parts[0].parse::<u32>() {
-            return Some((parts[1].to_string(), suffix));
-        }
+    let (base, suffix) = name.rsplit_once('-')?;
+    if base.is_empty() || base.contains('-') {
+        return None;
     }
-    None
+    Some((base.to_string(), suffix.parse::<u32>().ok()?))
 }
 
 #[cfg(test)]

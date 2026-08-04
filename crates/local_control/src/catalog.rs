@@ -353,8 +353,8 @@ define_action_catalog! {
     }
 
     rmux {
-        RmuxPeerList => { name: "rmux.peer.list", status: Implemented, target: Session, params: None, result: RmuxPeerList },
-        RmuxMessageSend => { name: "rmux.message.send", status: Implemented, target: Session, params: RmuxMessageSend, result: Acknowledgement },
-        RmuxMessageDrain => { name: "rmux.message.drain", status: Implemented, target: Session, params: None, result: RmuxMessageDrain },
+        RmuxPeerList => { name: "rmux.peer.list", status: Stub, target: Session, params: None, result: RmuxPeerList },
+        RmuxMessageSend => { name: "rmux.message.send", status: Stub, target: Session, params: RmuxMessageSend, result: Acknowledgement },
+        RmuxMessageDrain => { name: "rmux.message.drain", status: Stub, target: Session, params: None, result: RmuxMessageDrain },
     }
 }

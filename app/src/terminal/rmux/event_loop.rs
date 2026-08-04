@@ -27,6 +27,15 @@ pub(super) enum RmuxEventLoopMessage {
     Shutdown,
 }
 
+/// Events emitted by the EventLoop for model-to-model subscription.
+#[derive(Clone, Debug)]
+pub enum EventLoopEvent {
+    /// Emitted when the RMUX pane connects and pane_id is known.
+    Connected { pane_id: Option<u32> },
+    /// Emitted when the RMUX pane disconnects or fails to connect.
+    Disconnected,
+}
+
 pub(super) struct EventLoop {
     terminal_model: Arc<FairMutex<TerminalModel>>,
     channel_event_listener: ChannelEventListener,
@@ -70,14 +79,12 @@ impl EventLoop {
         match result {
             Ok((client, pane_id)) => {
                 self.pane_id = pane_id.or(self.pane_id);
-                // Note: Peer registration deferred to avoid complex view->manager wiring
-                // in this event loop. The peer handle is available via RmuxTerminalManager::peer()
-                // once the pane_id is known, but we cannot safely access the manager from here.
-                // For now, peer registration is handled externally if needed.
+                ctx.emit(EventLoopEvent::Connected { pane_id: self.pane_id });
                 self.attach_client(client, ctx);
             }
             Err(error) => {
                 log::error!("failed to start RMUX pane: {error:#}");
+                ctx.emit(EventLoopEvent::Disconnected);
                 if let Some(view) = self.weak_view.upgrade(ctx) {
                     view.update(ctx, |view, ctx| {
                         view.show_persistent_toast(
@@ -173,5 +180,5 @@ fn apply_snapshot(model: &Arc<FairMutex<TerminalModel>>, snapshot: &rmux_sdk::Pa
 }
 
 impl Entity for EventLoop {
-    type Event = ();
+    type Event = EventLoopEvent;
 }

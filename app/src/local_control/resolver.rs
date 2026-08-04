@@ -2,7 +2,8 @@
 use ::local_control::protocol::{
     ActionNameParams, ActionParameterSpec, BindingNameParams, BooleanValueParams, ColorValueParams,
     DirectionParams, EmptyParams, FileOpenParams, KeyParams, KeyValueParams, NamespaceParams,
-    PageQueryParams, PaneTarget, QueryParams, RenameParams, ResizeParams, SessionTarget,
+    PageQueryParams, PaneTarget, QueryParams, RenameParams, ResizeParams, RmuxMessageSend,
+    SessionTarget,
     TabActivateParams, TabCloseParams, TabCreateParams, TabTarget, TargetSelector, TextParams,
     ThemeNameParams, WindowTarget,
 };
@@ -53,6 +54,7 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         ActionParameterSpec::Query => parse_params::<QueryParams>(action),
         ActionParameterSpec::Rename => parse_params::<RenameParams>(action),
         ActionParameterSpec::Resize => parse_params::<ResizeParams>(action),
+        ActionParameterSpec::RmuxMessageSend => parse_params::<RmuxMessageSend>(action),
         ActionParameterSpec::TabActivate => parse_params::<TabActivateParams>(action),
         ActionParameterSpec::TabClose => parse_params::<TabCloseParams>(action),
         ActionParameterSpec::TabCreate => parse_params::<TabCreateParams>(action),

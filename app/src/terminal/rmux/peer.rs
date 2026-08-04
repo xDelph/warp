@@ -178,7 +178,7 @@ impl RmuxPeer {
             session_name: self.key.session_name.clone(),
             is_active: true,
         };
-        self.queue.register_pane(self.key, info);
+        self.queue.register_pane(self.key.clone(), info);
     }
 
     /// Unregisters this pane from peer discovery.

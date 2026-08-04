@@ -6217,42 +6217,23 @@ impl PaneGroup {
                     use crate::terminal::rmux::{RmuxPaneOwnership, RmuxPaneSpec};
                     use crate::terminal::pane_allocator;
 
-                    // Extract base command from conversation restoration harness if available
-                    let base_command = conversation_restoration.as_ref().and_then(|restoration| {
-                        match restoration {
-                            crate::terminal::view::ConversationRestorationInNewPaneType::Startup { conversations, .. } => {
-                                conversations.first().and_then(|conv| {
-                                    conv.server_metadata().map(|metadata| {
-                                        match metadata.harness {
-                                            warp_cli::agent::Harness::Claude => Some("claude"),
-                                            warp_cli::agent::Harness::Gemini => Some("gemini"),
-                                            warp_cli::agent::Harness::Codex => Some("codex"),
-                                            _ => None,
-                                        }
-                                    })
-                                })
-                            }
-                            crate::terminal::view::ConversationRestorationInNewPaneType::Historical { conversation, .. } => {
-                                conversation.server_metadata().map(|metadata| {
-                                    match metadata.harness {
-                                        warp_cli::agent::Harness::Claude => Some("claude"),
-                                        warp_cli::agent::Harness::Gemini => Some("gemini"),
-                                        warp_cli::agent::Harness::Codex => Some("codex"),
-                                        _ => None,
-                                    }
-                                })
-                            }
-                        }
-                    });
-
+                    // Agent launch context is not available at this boundary yet.
                     let session_name = pane_allocator::global_allocator()
-                        .allocate_rmux_session_name(base_command.as_deref());
-                    let spec = RmuxPaneSpec::new(session_name, RmuxPaneOwnership::WarpCreated);
-                    if let Some(cwd) = startup_directory.as_ref() {
-                        let _ = spec.set_cwd(cwd.to_string_lossy().as_ref());
-                    }
+                        .allocate_rmux_session_name(None);
+                    let spec = match startup_directory.as_ref() {
+                        Some(cwd) => RmuxPaneSpec::new(
+                            session_name,
+                            RmuxPaneOwnership::WarpCreated,
+                        )
+                        .with_cwd(cwd.to_string_lossy()),
+                        None => RmuxPaneSpec::new(
+                            session_name,
+                            RmuxPaneOwnership::WarpCreated,
+                        ),
+                    };
                     
-                    let terminal_init = crate::terminal::rmux::RmuxTerminalManager::create_model(
+                    let (terminal_view, terminal_manager) =
+                        crate::terminal::rmux::RmuxTerminalManager::create_model(
                         spec,
                         resources,
                         initial_size,
@@ -6260,7 +6241,7 @@ impl PaneGroup {
                         model_event_sender,
                         ctx,
                     );
-                    (terminal_init.view, terminal_init.manager)
+                    (terminal_view, terminal_manager)
                 } else {
                     // Fall back to LocalTty for SSH, shared sessions, or restorations
                     let all_restored_blocks =
