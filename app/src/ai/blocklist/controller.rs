@@ -2492,6 +2492,7 @@ impl BlocklistAIController {
             None,
             conversation_id,
             self.terminal_surface_id,
+            &ResolvedTeamScope::from_scope(&self.team_context(ctx)),
             ctx,
         );
 
@@ -2505,7 +2506,11 @@ impl BlocklistAIController {
                 log::warn!("Failed to append local ACP request: {error}");
                 return;
             }
-            history_model.mark_active_conversation_id(conversation_id, self.terminal_surface_id, ctx);
+            history_model.mark_active_conversation_id(
+                conversation_id,
+                self.terminal_surface_id,
+                ctx,
+            );
             history_model.update_conversation_status(
                 self.terminal_surface_id,
                 conversation_id,

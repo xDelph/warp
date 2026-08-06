@@ -175,8 +175,7 @@ pub(crate) fn handoff_marker(previous_harness: Option<Harness>, new_harness: Har
 /// Whether this exchange is the one just created for the prompt currently
 /// being submitted (input matches, no output yet).
 fn is_pending_current_exchange(exchange: &AIAgentExchange, current_prompt: &str) -> bool {
-    exchange.output_status.output().is_none()
-        && exchange.format_input_for_copy() == current_prompt
+    exchange.output_status.output().is_none() && exchange.format_input_for_copy() == current_prompt
 }
 
 fn digest_exchange(exchange: &AIAgentExchange) -> Option<ExchangeDigest> {
@@ -421,13 +420,10 @@ mod tests {
     #[test]
     fn no_primer_when_only_the_pending_exchange_exists() {
         let pending = exchange("first ever prompt", vec![]);
-        assert!(build_primer_from_exchanges(
-            &[&pending],
-            None,
-            Harness::Codex,
-            "first ever prompt",
-        )
-        .is_none());
+        assert!(
+            build_primer_from_exchanges(&[&pending], None, Harness::Codex, "first ever prompt",)
+                .is_none()
+        );
     }
 
     #[test]
@@ -436,7 +432,10 @@ mod tests {
             .map(|i| {
                 exchange(
                     &format!("question {i} {}", "x".repeat(1_000)),
-                    vec![text_message(i, &format!("answer {i} {}", "y".repeat(1_000)))],
+                    vec![text_message(
+                        i,
+                        &format!("answer {i} {}", "y".repeat(1_000)),
+                    )],
                 )
             })
             .collect();

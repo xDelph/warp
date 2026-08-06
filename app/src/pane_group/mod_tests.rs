@@ -4049,7 +4049,14 @@ fn test_build_ssh_reconnect_command_quotes_shell_metacharacters() {
     );
     // Every word built from remote data is single-quoted: the metacharacters
     // above appear only inside quotes, never bare on the command line.
-    assert!(!command.split("ssh -t ").nth(1).unwrap().replace("'\\''", "").split('\'').step_by(2).any(|bare| {
-        [';', '$', '`', '|', '&'].iter().any(|m| bare.contains(*m))
-    }));
+    assert!(
+        !command
+            .split("ssh -t ")
+            .nth(1)
+            .unwrap()
+            .replace("'\\''", "")
+            .split('\'')
+            .step_by(2)
+            .any(|bare| { [';', '$', '`', '|', '&'].iter().any(|m| bare.contains(*m)) })
+    );
 }

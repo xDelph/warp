@@ -161,6 +161,8 @@ use crate::ai::agent_conversations_model::{
 use crate::ai::ambient_agents::telemetry::HandoffEntryPoint;
 use crate::ai::attachment_utils::MAX_ATTACHMENT_SIZE_BYTES;
 use crate::ai::block_context::BlockContext;
+#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
+use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
 use crate::ai::blocklist::agent_view::{
     AgentInputFooter, AgentInputFooterEvent, AgentViewController, AgentViewEntryOrigin,
@@ -175,8 +177,6 @@ use crate::ai::blocklist::handoff::{
 };
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
-#[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
-use crate::ai::blocklist::ResponseStreamId;
 use crate::ai::blocklist::{
     AttachmentType, BLOCK_CONTEXT_ATTACHMENT_REGEX, BlocklistAIActionModel,
     BlocklistAIContextEvent, BlocklistAIContextModel, BlocklistAIController,
@@ -15335,13 +15335,9 @@ impl Input {
         // so the first submission doesn't pay the agent cold-boot handshake.
         #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
         if crate::ai::local_acp::local_acp_enabled(ctx) {
-            let cwd = self
-                .model
-                .lock()
-                .session_startup_path()
-                .unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                });
+            let cwd = self.model.lock().session_startup_path().unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
             crate::ai::acp::submit::prewarm_selected_local_acp_agent(cwd, ctx);
         }
     }

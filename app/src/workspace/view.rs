@@ -24939,9 +24939,11 @@ impl TypedActionView for Workspace {
             } => {
                 let teammates = *teammates;
                 let remote_host = remote_host.clone();
-                self.active_tab_pane_group().clone().update(ctx, |pane_group, ctx| {
-                    pane_group.create_local_acp_agent_team(teammates, remote_host, ctx);
-                });
+                self.active_tab_pane_group()
+                    .clone()
+                    .update(ctx, |pane_group, ctx| {
+                        pane_group.create_local_acp_agent_team(teammates, remote_host, ctx);
+                    });
             }
             OpenCloudAgentSetupGuide => {
                 if AISettings::as_ref(ctx).is_any_ai_enabled(ctx)

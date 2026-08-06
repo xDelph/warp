@@ -13,8 +13,8 @@ use crate::ai::acp::harness_picker::LocalAcpHarnessModel;
 use crate::ai::acp::submit_model::LocalAcpRemoteTarget;
 use crate::ai::acp::team::{LocalAcpTeam, LocalAcpTeamMember, LocalAcpTeamModel};
 use crate::ai::acp::{path_search, registry};
-use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
+use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::pane_group::{DefaultSessionModeBehavior, Direction, PaneGroup, PaneId};
 
 const MAX_TEAMMATES: usize = 8;
@@ -43,10 +43,9 @@ impl PaneGroup {
         };
         let lead_terminal_view_id = lead_view.id();
 
-        let (harness, model_id) = LocalAcpHarnessModel::handle(ctx)
-            .read(ctx, |model, _ctx| {
-                (model.selected_harness(), model.selected_model_id_owned())
-            });
+        let (harness, model_id) = LocalAcpHarnessModel::handle(ctx).read(ctx, |model, _ctx| {
+            (model.selected_harness(), model.selected_model_id_owned())
+        });
         if !registry::is_local_acp_harness(harness) {
             log::warn!("Cannot create an agent team: {harness} does not support local ACP");
             return;
@@ -120,6 +119,7 @@ impl PaneGroup {
                         name.clone(),
                         lead_conversation_id,
                         Some(harness),
+                        false,
                         ctx,
                     )
                 });

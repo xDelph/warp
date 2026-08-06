@@ -504,10 +504,10 @@ impl SingletonEntity for HarnessAvailabilityModel {}
 
 #[cfg(all(test, feature = "local_acp", not(target_family = "wasm")))]
 mod tests {
-    use super::*;
     use settings::Setting;
     use warpui::{App, SingletonEntity};
 
+    use super::*;
     use crate::settings::AISettings;
     use crate::test_util::terminal::initialize_app_for_terminal_view;
 

@@ -3,9 +3,8 @@ use ::local_control::protocol::{
     ActionNameParams, ActionParameterSpec, BindingNameParams, BooleanValueParams, ColorValueParams,
     DirectionParams, EmptyParams, FileOpenParams, KeyParams, KeyValueParams, NamespaceParams,
     PageQueryParams, PaneTarget, QueryParams, RenameParams, ResizeParams, RmuxMessageSend,
-    SessionTarget,
-    TabActivateParams, TabCloseParams, TabCreateParams, TabTarget, TargetSelector, TextParams,
-    ThemeNameParams, WindowTarget,
+    SessionTarget, TabActivateParams, TabCloseParams, TabCreateParams, TabTarget, TargetSelector,
+    TextParams, ThemeNameParams, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode, TargetScope};
 use warpui::{AppContext, ModelContext, TypedActionView, ViewHandle, WindowId};

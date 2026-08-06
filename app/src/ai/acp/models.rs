@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use agent_client_protocol as acp;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_process::Command;
 use warp_cli::agent::Harness;
 
@@ -52,13 +52,16 @@ pub(crate) async fn discover_models_for_harness(
     harness: Harness,
 ) -> Result<Vec<LocalAcpModelInfo>> {
     log::debug!("discovering ACP models for {harness} (official SDK)");
-    
+
     // Check cache first if available
     if let Some(cached_models) = super::model_cache::ModelCache::try_get_cached_models(harness) {
-        log::debug!("using cached models for {harness}: {} models", cached_models.len());
+        log::debug!(
+            "using cached models for {harness}: {} models",
+            cached_models.len()
+        );
         return Ok(cached_models);
     }
-    
+
     let result = tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -72,9 +75,7 @@ pub(crate) async fn discover_models_for_harness(
             )
             .await
             .map_err(|_| {
-                anyhow!(
-                    "{harness} ACP model discovery timed out after {MODEL_DISCOVERY_TIMEOUT:?}"
-                )
+                anyhow!("{harness} ACP model discovery timed out after {MODEL_DISCOVERY_TIMEOUT:?}")
             })?
         }))
     })
@@ -370,9 +371,6 @@ mod tests {
             "Devin ACP handshake failed: {}",
             models.unwrap_err()
         );
-        assert!(
-            !models.unwrap().is_empty(),
-            "Devin ACP returned no models"
-        );
+        assert!(!models.unwrap().is_empty(), "Devin ACP returned no models");
     }
 }

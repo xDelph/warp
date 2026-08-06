@@ -91,11 +91,7 @@ pub fn file_diff_from_old_new(
 
     let (windowed_old, windowed_new) = window_diff(old_full, new_full, context);
     let deltas = line_diff_deltas(&windowed_old, &windowed_new);
-    FileDiff::new(
-        windowed_old,
-        file_path,
-        DiffType::update(deltas, None),
-    )
+    FileDiff::new(windowed_old, file_path, DiffType::update(deltas, None))
 }
 
 /// Converts a line diff between `base` and `target` into editor [`DiffDelta`]s (1-indexed).
@@ -364,7 +360,8 @@ mod tests {
     fn resolve_edit_old_new_handles_incomplete_acp_snapshot() {
         let disk = "#![allow(dead_code)]\n// test comment\n\npub(crate) mod diff_window;\npub(crate) mod openusage;";
         let acp_new = "#![allow(dead_code)]\n// test comment\n\npub(crate) mod diff_window;";
-        let pre_edit = "#![allow(dead_code)]\n\npub(crate) mod diff_window;\npub(crate) mod openusage;";
+        let pre_edit =
+            "#![allow(dead_code)]\n\npub(crate) mod diff_window;\npub(crate) mod openusage;";
 
         let (old_full, new_full) =
             resolve_edit_old_new(None, acp_new.to_string(), Some(disk.to_string()));
@@ -382,10 +379,7 @@ mod tests {
                 .iter()
                 .any(|delta| delta.insertion.contains("// test comment"))
         );
-        let deleted_lines: usize = deltas
-            .iter()
-            .map(|d| d.replacement_line_range.len())
-            .sum();
+        let deleted_lines: usize = deltas.iter().map(|d| d.replacement_line_range.len()).sum();
         assert_eq!(deleted_lines, 0);
     }
 }

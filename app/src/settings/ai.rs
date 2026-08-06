@@ -30,6 +30,7 @@ use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel, Wea
 
 use crate::ai::execution_profiles::ExecutionProfilesConfig;
 use crate::ai::request_usage_model::RequestLimitInfo;
+pub use ai::LLMId;
 use crate::auth::AuthStateProvider;
 use crate::settings::PrivacySettings;
 use crate::terminal::{CLIAgent, TerminalView};
@@ -2163,6 +2164,19 @@ define_settings_group!(AISettings, settings: [
         description: "Whether the Warp Agent adds an attribution co-author line to commit messages and pull requests it creates.",
     }
 
+    // User's favorite AI models. Stored as a list of model IDs.
+    // Synced to cloud so favorites are available across devices.
+    favorite_models: FavoriteModels {
+        type: Vec<String>,
+        default: vec![],
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "agents.models.favorite_models",
+        description: "User's favorite AI models.",
+    }
+
     should_force_disable_cloud_handoff: ShouldForceDisableCloudHandoff {
         type: bool,
         default: false,
@@ -2461,6 +2475,44 @@ impl AISettings {
             crate::workspaces::workspace::AdminEnablementSetting::Disable
         )
     }
+
+    /// Returns whether a model is in the user's favorites list.
+    pub fn is_favorite_model(&self, model_id: &str) -> bool {
+        self.favorite_models.contains(&model_id.to_string())
+    }
+
+    /// Adds a model to the user's favorites list.
+    pub fn add_favorite_model(&mut self, model_id: String, ctx: &mut ModelContext<Self>) {
+        let mut favorites = self.favorite_models.clone();
+        if !favorites.contains(&model_id) {
+            favorites.push(model_id);
+            report_if_error!(self.favorite_models.set_value(favorites, ctx));
+        }
+    }
+
+    /// Removes a model from the user's favorites list.
+    pub fn remove_favorite_model(&mut self, model_id: &str, ctx: &mut ModelContext<Self>) {
+        let mut favorites = self.favorite_models.clone();
+        if let Some(pos) = favorites.iter().position(|id| id == model_id) {
+            favorites.remove(pos);
+            report_if_error!(self.favorite_models.set_value(favorites, ctx));
+        }
+    }
+
+    /// Toggles a model's favorite status.
+    pub fn toggle_favorite_model(&mut self, model_id: String, ctx: &mut ModelContext<Self>) {
+        if self.is_favorite_model(&model_id) {
+            self.remove_favorite_model(&model_id, ctx);
+        } else {
+            self.add_favorite_model(model_id, ctx);
+        }
+    }
+
+    /// Returns the list of favorite model IDs.
+    pub fn get_favorite_models(&self) -> Vec<String> {
+        self.favorite_models.clone()
+    }
+
     pub fn is_ampersand_handoff_enabled(&self, app: &warpui::AppContext) -> bool {
         self.is_cloud_handoff_enabled(app) && !*self.should_force_disable_ampersand_handoff
     }

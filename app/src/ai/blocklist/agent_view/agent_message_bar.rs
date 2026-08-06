@@ -261,7 +261,7 @@ impl AgentMessageBar {
             }
         });
 
-        Self {
+        let message_bar = Self {
             agent_view_controller,
             ephemeral_message_model,
             shortcut_view_model,

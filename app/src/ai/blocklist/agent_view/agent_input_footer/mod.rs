@@ -43,17 +43,16 @@ use warpui::elements::{
     Flex, MainAxisAlignment, MainAxisSize, OffsetPositioning, ParentAnchor, ParentElement,
     ParentOffsetBounds, Radius, Shrinkable, Stack, Text, Wrap, WrapFill, WrapFillEntireRun,
 };
+use warpui::scene::Border;
 use warpui::{
     AppContext, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-use warpui::scene::Border;
 
 pub(crate) use self::environment_selector::{
     EnvironmentSelector, EnvironmentSelectorEvent, EnvironmentSelectorTarget,
 };
 use crate::ai::AIRequestUsageModel;
-use crate::ai::blocklist::BlocklistAIInputModel;
 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
 use crate::ai::acp::selectors::{
     LocalAcpHarnessSelector, LocalAcpModelSelector, LocalAcpSelectorEvent,
@@ -64,6 +63,7 @@ use crate::ai::acp::{
     models as local_acp_models, openusage as local_acp_openusage,
 };
 use crate::ai::agent::conversation::AIConversation;
+use crate::ai::blocklist::BlocklistAIInputModel;
 use crate::ai::blocklist::agent_view::is_in_cloud_context;
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::blocklist::prompt::prompt_alert::{PromptAlertEvent, PromptAlertView};

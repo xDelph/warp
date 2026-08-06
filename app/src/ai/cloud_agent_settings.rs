@@ -88,6 +88,16 @@ define_settings_group!(CloudAgentSettings, settings: [
         sync_to_cloud: SyncToCloud::Never,
         surface: settings::SettingSurfaces::GUI,
         private: true,
+    },
+    // Global effort configuration for AI API calls.
+    // Controls the reasoning effort level for model inference.
+    ai_effort_level: AiEffortLevel {
+        type: Option<String>,
+        default: None,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Never,
+        surface: settings::SettingSurfaces::GUI,
+        private: true,
     }
 ]);
 
@@ -131,5 +141,19 @@ impl CloudAgentSettings {
             );
         }
         report_if_error!(self.last_selected_harness_model.set_value(map, ctx));
+    }
+
+    /// Gets the configured AI effort level, if any.
+    pub fn ai_effort_level(&self) -> Option<&str> {
+        self.ai_effort_level.value().as_deref()
+    }
+
+    /// Sets the AI effort level.
+    pub fn set_ai_effort_level(
+        &mut self,
+        effort_level: Option<String>,
+        ctx: &mut warpui::ModelContext<Self>,
+    ) {
+        report_if_error!(self.ai_effort_level.set_value(effort_level, ctx));
     }
 }

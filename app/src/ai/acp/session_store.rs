@@ -36,15 +36,13 @@ impl LocalAcpSessionStore {
     }
 
     pub(crate) fn session_id(&self, harness: Harness) -> Option<&str> {
-        self.sessions_by_harness
-            .get(&harness)
-            .and_then(|info| {
-                if info.last_used.elapsed() < self.session_ttl {
-                    Some(info.session_id.as_str())
-                } else {
-                    None
-                }
-            })
+        self.sessions_by_harness.get(&harness).and_then(|info| {
+            if info.last_used.elapsed() < self.session_ttl {
+                Some(info.session_id.as_str())
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn set_session_id(&mut self, harness: Harness, session_id: String) {
@@ -78,16 +76,14 @@ impl LocalAcpSessionStore {
 
     /// Get the time remaining until a session expires
     pub(crate) fn session_time_remaining(&self, harness: Harness) -> Option<Duration> {
-        self.sessions_by_harness
-            .get(&harness)
-            .and_then(|info| {
-                let elapsed = info.last_used.elapsed();
-                if elapsed < self.session_ttl {
-                    Some(self.session_ttl - elapsed)
-                } else {
-                    None
-                }
-            })
+        self.sessions_by_harness.get(&harness).and_then(|info| {
+            let elapsed = info.last_used.elapsed();
+            if elapsed < self.session_ttl {
+                Some(self.session_ttl - elapsed)
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn last_harness(&self, conversation_id: AIConversationId) -> Option<Harness> {
@@ -96,11 +92,7 @@ impl LocalAcpSessionStore {
             .copied()
     }
 
-    pub(crate) fn set_last_harness(
-        &mut self,
-        conversation_id: AIConversationId,
-        harness: Harness,
-    ) {
+    pub(crate) fn set_last_harness(&mut self, conversation_id: AIConversationId, harness: Harness) {
         self.last_harness_by_conversation
             .insert(conversation_id, harness);
     }
@@ -124,8 +116,9 @@ impl SingletonEntity for LocalAcpSessionStore {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use warp_cli::agent::Harness;
+
+    use super::*;
 
     #[test]
     fn test_session_ttl() {
@@ -139,11 +132,11 @@ mod tests {
         let session_id = "test-session-123".to_string();
 
         store.set_session_id(harness, session_id.clone());
-        
+
         // Session should be valid immediately
         assert!(store.has_valid_session(harness));
         assert_eq!(store.session_id(harness), Some("test-session-123"));
-        
+
         // Check time remaining
         let remaining = store.session_time_remaining(harness);
         assert!(remaining.is_some());
@@ -162,13 +155,13 @@ mod tests {
         let session_id = "test-session-456".to_string();
 
         store.set_session_id(harness, session_id);
-        
+
         // Session should be valid immediately
         assert!(store.has_valid_session(harness));
-        
+
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(150));
-        
+
         // Session should now be expired
         assert!(!store.has_valid_session(harness));
         assert_eq!(store.session_id(harness), None);
@@ -186,11 +179,11 @@ mod tests {
         let session_id = "test-session-789".to_string();
 
         store.set_session_id(harness, session_id);
-        
+
         // Touch session should update last_used time
         std::thread::sleep(Duration::from_millis(10));
         store.touch_session(harness);
-        
+
         // Session should still be valid
         assert!(store.has_valid_session(harness));
     }
@@ -205,14 +198,14 @@ mod tests {
 
         store.set_session_id(Harness::Claude, "session-1".to_string());
         store.set_session_id(Harness::Codex, "session-2".to_string());
-        
+
         assert_eq!(store.active_session_count(), 2);
-        
+
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(150));
-        
+
         store.cleanup_expired_sessions();
-        
+
         // All sessions should be cleaned up
         assert_eq!(store.active_session_count(), 0);
     }
@@ -226,13 +219,13 @@ mod tests {
         };
 
         let conversation_id = crate::ai::agent::conversation::AIConversationId::new();
-        
+
         // Initially no harness
         assert!(store.last_harness(conversation_id).is_none());
-        
+
         store.set_last_harness(conversation_id, Harness::Claude);
         assert_eq!(store.last_harness(conversation_id), Some(Harness::Claude));
-        
+
         store.set_last_harness(conversation_id, Harness::Codex);
         assert_eq!(store.last_harness(conversation_id), Some(Harness::Codex));
     }

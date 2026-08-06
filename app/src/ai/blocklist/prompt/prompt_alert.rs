@@ -119,11 +119,6 @@ impl PromptAlertView {
             ctx.notify();
         });
 
-        ctx.subscribe_to_model(&privacy_settings, |me, _, _, ctx| {
-            me.state = Self::determine_state(ctx);
-            ctx.notify();
-        });
-
         ctx.subscribe_to_model(&api_key_manager, |me, _, _, ctx| {
             me.state =
                 Self::determine_state(&UserWorkspaces::as_ref(ctx).team_context_for_view(ctx), ctx);

@@ -1334,6 +1334,82 @@ impl AIExecutionProfilesModel {
         }
     }
 
+    pub fn set_base_model_effort(
+        &mut self,
+        profile_id: &ExecutionProfileId,
+        effort: Option<cloud_object_models::ModelEffort>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                if profile.base_model_effort != effort {
+                    profile.base_model_effort = effort;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+    }
+
+    pub fn set_coding_model_effort(
+        &mut self,
+        profile_id: &ExecutionProfileId,
+        effort: Option<cloud_object_models::ModelEffort>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                if profile.coding_model_effort != effort {
+                    profile.coding_model_effort = effort;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+    }
+
+    pub fn set_cli_agent_model_effort(
+        &mut self,
+        profile_id: &ExecutionProfileId,
+        effort: Option<cloud_object_models::ModelEffort>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                if profile.cli_agent_model_effort != effort {
+                    profile.cli_agent_model_effort = effort;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+    }
+
+    pub fn set_computer_use_model_effort(
+        &mut self,
+        profile_id: &ExecutionProfileId,
+        effort: Option<cloud_object_models::ModelEffort>,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.edit_profile_internal(
+            profile_id,
+            |profile| {
+                if profile.computer_use_model_effort != effort {
+                    profile.computer_use_model_effort = effort;
+                    return true;
+                }
+                false
+            },
+            ctx,
+        );
+    }
+
     pub fn set_context_window_limit(
         &mut self,
         profile_id: &ExecutionProfileId,

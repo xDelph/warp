@@ -128,7 +128,7 @@ fn test_network_log_is_not_persisted() {
 #[test]
 fn test_environment_management_is_not_persisted() {
     let env_mgmt = LeafContents::EnvironmentManagement(EnvironmentManagementPaneSnapshot {
-        uuid: vec![1, 2, 3],
+        mode: crate::settings_view::environments_page::EnvironmentsPage::default(),
     });
     assert!(!env_mgmt.is_persisted());
 }

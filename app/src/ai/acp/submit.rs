@@ -38,7 +38,9 @@ pub(crate) fn try_submit_local_acp_query<V: View>(
     // member's own dedicated agent session, not the shared worker for the
     // currently selected harness.
     let team_member = super::team::LocalAcpTeamModel::handle(ctx).read(ctx, |team_model, _ctx| {
-        team_model.member_for_conversation(&conversation_id).cloned()
+        team_model
+            .member_for_conversation(&conversation_id)
+            .cloned()
     });
     let (harness, model_id, cwd, remote, worker_tag) = match team_member {
         Some(member) => (

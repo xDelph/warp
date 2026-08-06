@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use rmux_server::{default_socket_path, DaemonConfig, ServerDaemon, ServerHandle};
+use rmux_server::{DaemonConfig, ServerDaemon, ServerHandle, default_socket_path};
 use tokio::sync::OnceCell;
 
 /// Global embedded daemon instance.
@@ -31,7 +31,9 @@ mod tests {
     #[tokio::test]
     async fn test_embedded_daemon_starts() {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            ensure_embedded_daemon().await.expect("embedded RMUX starts");
+            ensure_embedded_daemon()
+                .await
+                .expect("embedded RMUX starts");
         })
         .await
         .expect("embedded RMUX starts within timeout");

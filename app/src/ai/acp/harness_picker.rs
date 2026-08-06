@@ -89,9 +89,11 @@ impl LocalAcpHarnessModel {
         self.selected_model_id =
             saved_model_id_for_harness(CloudAgentSettings::as_ref(ctx), harness);
         CloudAgentSettings::handle(ctx).update(ctx, |settings, ctx| {
-            report_if_error!(settings
-                .last_selected_harness
-                .set_value(Some(harness.config_name().to_string()), ctx));
+            report_if_error!(
+                settings
+                    .last_selected_harness
+                    .set_value(Some(harness.config_name().to_string()), ctx)
+            );
         });
         telemetry::record_local_acp_harness_selected(self.selected_harness);
         self.ensure_models_discovered(harness, ctx);

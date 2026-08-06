@@ -109,7 +109,9 @@ pub(crate) fn default_session_mode(_harness: Harness) -> Option<&'static str> {
     None
 }
 
-pub(crate) fn process_env_for_harness(_harness: Harness) -> &'static [(&'static str, &'static str)] {
+pub(crate) fn process_env_for_harness(
+    _harness: Harness,
+) -> &'static [(&'static str, &'static str)] {
     &[]
 }
 

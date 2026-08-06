@@ -579,29 +579,25 @@ impl ModelSelector {
         }
 
         let models = HarnessAvailabilityModel::as_ref(ctx).models_for_picker(harness, ctx);
-        items.extend(
-            models
-                .iter()
-                .filter_map(|model| {
-                    let display_name = model.display_name.clone();
-                    if !query.is_empty() && !display_name.to_lowercase().contains(query) {
-                        return None;
-                    }
-                    Some(MenuItem::Item(
-                        MenuItemFields::new(display_name)
-                            .with_icon(icon)
-                            .with_icon_size_override(ITEM_ICON_SIZE)
-                            .with_font_size_override(ITEM_FONT_SIZE)
-                            .with_padding_override(ITEM_VERTICAL_PADDING, MENU_HORIZONTAL_PADDING)
-                            .with_override_hover_background_color(hover_background)
-                            .with_on_select_action(ModelSelectorAction::SelectHarnessModel {
-                                harness,
-                                model_id: model.id.clone(),
-                                reasoning_level: model.reasoning_level.clone(),
-                            }),
-                    ))
-                }),
-        );
+        items.extend(models.iter().filter_map(|model| {
+            let display_name = model.display_name.clone();
+            if !query.is_empty() && !display_name.to_lowercase().contains(query) {
+                return None;
+            }
+            Some(MenuItem::Item(
+                MenuItemFields::new(display_name)
+                    .with_icon(icon)
+                    .with_icon_size_override(ITEM_ICON_SIZE)
+                    .with_font_size_override(ITEM_FONT_SIZE)
+                    .with_padding_override(ITEM_VERTICAL_PADDING, MENU_HORIZONTAL_PADDING)
+                    .with_override_hover_background_color(hover_background)
+                    .with_on_select_action(ModelSelectorAction::SelectHarnessModel {
+                        harness,
+                        model_id: model.id.clone(),
+                        reasoning_level: model.reasoning_level.clone(),
+                    }),
+            ))
+        }));
 
         (items, active_action)
     }

@@ -213,6 +213,10 @@ impl BlocklistAIPermissions {
             context_window_limit: profile_data.context_window_limit,
             autosync_plans_to_warp_drive: profile_data.autosync_plans_to_warp_drive,
             web_search_enabled: profile_data.web_search_enabled,
+            base_model_effort: profile_data.base_model_effort,
+            cli_agent_model_effort: profile_data.cli_agent_model_effort,
+            coding_model_effort: profile_data.coding_model_effort,
+            computer_use_model_effort: profile_data.computer_use_model_effort,
         }
     }
 

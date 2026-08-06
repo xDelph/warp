@@ -687,6 +687,18 @@ input ClientContext {
   version: String
 }
 
+"""
+Output configuration for AI model inference.
+Controls reasoning effort and other output parameters.
+"""
+input OutputConfig {
+  """
+  Reasoning effort level for the AI model.
+  Higher values indicate more computational effort and potentially better results.
+  """
+  effort: String
+}
+
 type CloudConversationStoragePolicy {
   defaultSetting: AdminEnablementSetting!
   isUnlimited: Boolean!
@@ -1573,6 +1585,11 @@ input GenerateCommandsInput {
   That information will now be included in requestContext.
   """
   prompt: String!
+  """
+  Optional output configuration for the AI model.
+  Controls reasoning effort and other output parameters.
+  """
+  outputConfig: OutputConfig
 }
 
 type GenerateCommandsOutput implements Response {
@@ -1600,6 +1617,11 @@ input GenerateDialogueInput {
   That information will now be included in requestContext.
   """
   transcript: [TranscriptPart!]!
+  """
+  Optional output configuration for the AI model.
+  Controls reasoning effort and other output parameters.
+  """
+  outputConfig: OutputConfig
 }
 
 type GenerateDialogueOutput implements Response {

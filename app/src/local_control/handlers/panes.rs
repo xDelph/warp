@@ -4,15 +4,17 @@
 #[cfg(test)]
 #[path = "panes_tests.rs"]
 mod tests;
-use ::local_control::protocol::{DirectionParams, PaneTarget, RenameParams, TabTarget, TargetSelector, TextParams};
+use ::local_control::protocol::{
+    DirectionParams, PaneTarget, RenameParams, TabTarget, TargetSelector, TextParams,
+};
 use ::local_control::{Action, ActionKind, ControlError, ErrorCode};
 use serde::Serialize;
 use warpui::{ModelContext, ViewHandle, WindowId};
 
-use crate::local_control::resolver::target_window_id_for_target;
 use crate::local_control::LocalControlBridge;
-use crate::pane_group::local_control::ControlPaneSummary;
+use crate::local_control::resolver::target_window_id_for_target;
 use crate::pane_group::PaneId;
+use crate::pane_group::local_control::ControlPaneSummary;
 use crate::terminal::TerminalView;
 use crate::workspace::Workspace;
 
@@ -86,7 +88,10 @@ fn workspace_for_target(
         .ok_or_else(|| {
             ControlError::new(
                 ErrorCode::MissingTarget,
-                format!("{} requires a workspace in the target window", action.as_str()),
+                format!(
+                    "{} requires a workspace in the target window",
+                    action.as_str()
+                ),
             )
         })?;
     Ok((window_id, workspace))
@@ -144,9 +149,9 @@ fn tab_summary(
     tab_index: usize,
     ctx: &warpui::AppContext,
 ) -> Result<TabSummary, ControlError> {
-    let tab = workspace.get_pane_group_view(tab_index).ok_or_else(|| {
-        ControlError::new(ErrorCode::MissingTarget, "tab index out of bounds")
-    })?;
+    let tab = workspace
+        .get_pane_group_view(tab_index)
+        .ok_or_else(|| ControlError::new(ErrorCode::MissingTarget, "tab index out of bounds"))?;
     let pane_group = tab.as_ref(ctx);
     Ok(TabSummary {
         id: tab.id().to_string(),
@@ -215,7 +220,10 @@ fn resolve_target_pane(
                 .ok_or_else(|| {
                     ControlError::new(
                         ErrorCode::MissingTarget,
-                        format!("{} cannot resolve the requested pane index", action.as_str()),
+                        format!(
+                            "{} cannot resolve the requested pane index",
+                            action.as_str()
+                        ),
                     )
                 })?,
             Some(PaneTarget::Id { .. }) => unreachable!("handled above"),
@@ -533,9 +541,7 @@ pub(crate) fn input_run(
     )
 }
 
-fn direction_param(
-    action: &Action,
-) -> Result<crate::pane_group::Direction, ControlError> {
+fn direction_param(action: &Action) -> Result<crate::pane_group::Direction, ControlError> {
     let direction = match serde_json::from_value::<DirectionParams>(action.params.clone()) {
         Ok(DirectionParams { direction }) => direction,
         _ => {
@@ -553,10 +559,7 @@ fn direction_param(
         ::local_control::protocol::Direction::Previous
         | ::local_control::protocol::Direction::Next => Err(ControlError::new(
             ErrorCode::InvalidParams,
-            format!(
-                "{} only accepts left/right/up/down",
-                action.kind.as_str()
-            ),
+            format!("{} only accepts left/right/up/down", action.kind.as_str()),
         )),
     }
 }
@@ -577,9 +580,7 @@ pub(crate) fn pane_split(
         .read(ctx, |workspace, _| {
             workspace.get_pane_group_view(tab_index).cloned()
         })
-        .ok_or_else(|| {
-            ControlError::new(ErrorCode::MissingTarget, "tab index out of bounds")
-        })?;
+        .ok_or_else(|| ControlError::new(ErrorCode::MissingTarget, "tab index out of bounds"))?;
     let base_terminal_pane_id = pane_id.as_terminal_pane_id();
     let new_pane_id = pane_group.update(ctx, |pane_group, ctx| {
         pane_group.add_session(

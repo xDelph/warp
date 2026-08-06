@@ -52,7 +52,11 @@ fn write_cell(
 ) {
     let style = (cell.foreground, cell.background, cell.attributes);
     if *last_style != Some(style) {
-        out.extend_from_slice(&sgr_sequence(cell.foreground, cell.background, cell.attributes));
+        out.extend_from_slice(&sgr_sequence(
+            cell.foreground,
+            cell.background,
+            cell.attributes,
+        ));
         *last_style = Some(style);
     }
     out.extend_from_slice(cell.text().as_bytes());
@@ -194,13 +198,17 @@ mod tests {
             text.contains("38;2;10;20;30"),
             "expected rgb fg in {text:?}"
         );
-        assert!(text.contains(";39;49m"), "expected default colors in {text:?}");
+        assert!(
+            text.contains(";39;49m"),
+            "expected default colors in {text:?}"
+        );
     }
 
     #[test]
     fn maps_attributes_to_sgr_codes() {
         let mut cell = PaneCell::new(PaneGlyph::new("x", 1));
-        cell.attributes = PaneAttributes::BOLD | PaneAttributes::UNDERLINE | PaneAttributes::REVERSE;
+        cell.attributes =
+            PaneAttributes::BOLD | PaneAttributes::UNDERLINE | PaneAttributes::REVERSE;
         let snapshot = snapshot_from_rows(1, &[vec![cell]]);
         let text = as_text(&render_pane_snapshot_as_ansi(&snapshot));
         assert!(text.contains(";1;"), "expected bold in {text:?}");

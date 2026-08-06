@@ -111,4 +111,10 @@ pub enum GenerateCommandsFailureType {
 #[derive(cynic::InputObject, Debug)]
 pub struct GenerateCommandsInput {
     pub prompt: String,
+    pub output_config: Option<OutputConfig>,
+}
+
+#[derive(cynic::InputObject, Debug)]
+pub struct OutputConfig {
+    pub effort: Option<String>,
 }

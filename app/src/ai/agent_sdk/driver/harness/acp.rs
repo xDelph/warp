@@ -11,11 +11,11 @@ use warpui::ModelHandle;
 
 use super::{HarnessRunner, ResumePayload, ThirdPartyHarness};
 use crate::ai::acp::registry;
+use crate::ai::agent_sdk::driver::AgentDriverError;
 use crate::ai::agent_sdk::driver::harness::HarnessKind;
 use crate::ai::agent_sdk::driver::terminal::TerminalDriver;
-use crate::ai::agent_sdk::driver::AgentDriverError;
-use crate::ai::ambient_agents::task::HarnessModelConfig;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::ambient_agents::task::HarnessModelConfig;
 use crate::ai::mcp::JSONMCPServer;
 use crate::server::server_api::ServerApi;
 use crate::terminal::CLIAgent;

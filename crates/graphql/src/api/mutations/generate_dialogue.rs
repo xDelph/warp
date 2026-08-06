@@ -100,10 +100,16 @@ pub enum GenerateDialogueStatus {
 pub struct GenerateDialogueInput {
     pub prompt: String,
     pub transcript: Vec<TranscriptPart>,
+    pub output_config: Option<OutputConfig>,
 }
 
 #[derive(cynic::InputObject, Debug)]
 pub struct TranscriptPart {
     pub assistant: String,
     pub user: String,
+}
+
+#[derive(cynic::InputObject, Debug)]
+pub struct OutputConfig {
+    pub effort: Option<String>,
 }

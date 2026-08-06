@@ -1780,8 +1780,14 @@ impl AIClient for ServerApi {
     ) -> Result<Vec<AIGeneratedCommand>, GenerateCommandsFromNaturalLanguageError> {
         let default_err = GenerateCommandsFromNaturalLanguageError::Other;
 
+        // TODO: Read effort configuration from settings when effort feature is implemented
+        let output_config = None;
+
         let variables = GenerateCommandsVariables {
-            input: GenerateCommandsInput { prompt },
+            input: GenerateCommandsInput {
+                prompt,
+                output_config,
+            },
             request_context: get_request_context(),
         };
 
@@ -1824,10 +1830,15 @@ impl AIClient for ServerApi {
                 assistant: part.raw_assistant_answer().to_string(),
             })
             .collect();
+
+        // TODO: Read effort configuration from settings when effort feature is implemented
+        let output_config = None;
+
         let variables = GenerateDialogueVariables {
             input: GenerateDialogueInput {
                 transcript: graphql_transcript,
                 prompt,
+                output_config,
             },
             request_context: get_request_context(),
         };

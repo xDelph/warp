@@ -456,14 +456,8 @@ fn retained_action_examples() -> Vec<(ActionKind, Vec<&'static str>)> {
             ActionKind::PaneResetName,
             vec!["warpctrl", "pane", "reset-name"],
         ),
-        (
-            ActionKind::BlockOutput,
-            vec!["warpctrl", "pane", "read"],
-        ),
-        (
-            ActionKind::InputRun,
-            vec!["warpctrl", "pane", "run", "pwd"],
-        ),
+        (ActionKind::BlockOutput, vec!["warpctrl", "pane", "read"]),
+        (ActionKind::InputRun, vec!["warpctrl", "pane", "run", "pwd"]),
         (ActionKind::SessionList, vec!["warpctrl", "session", "list"]),
         (
             ActionKind::SessionInspect,

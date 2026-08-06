@@ -50,7 +50,7 @@ mod skill_dirs_publish;
 mod telemetry;
 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
 #[allow(unused_imports)]
-pub(crate) use acp::{local_acp_harness_kind, AcpHarness};
+pub(crate) use acp::{AcpHarness, local_acp_harness_kind};
 pub(crate) use claude_code::ClaudeHarness;
 use claude_transcript::ClaudeResumeInfo;
 use codex::CodexHarness;

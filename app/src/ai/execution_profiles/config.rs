@@ -474,6 +474,14 @@ struct ExecutionProfileFile {
     cli_agent_model: Option<String>,
     #[schemars(description = "Optional computer-use model override.")]
     computer_use_model: Option<String>,
+    #[schemars(description = "Optional reasoning effort level for the base model (low, medium, high).")]
+    base_model_effort: Option<String>,
+    #[schemars(description = "Optional reasoning effort level for the coding model (low, medium, high).")]
+    coding_model_effort: Option<String>,
+    #[schemars(description = "Optional reasoning effort level for the CLI agent model (low, medium, high).")]
+    cli_agent_model_effort: Option<String>,
+    #[schemars(description = "Optional reasoning effort level for the computer use model (low, medium, high).")]
+    computer_use_model_effort: Option<String>,
     #[schemars(
         description = "Optional context window limit in tokens. The valid range is model-dependent and determined server-side; the value is automatically clamped to the selected model's supported context window. Consult the selected model's documentation for its actual supported range."
     )]
@@ -527,6 +535,10 @@ impl From<&AIExecutionProfile> for ExecutionProfileFile {
             coding_model: profile.coding_model.clone().map(Into::into),
             cli_agent_model: profile.cli_agent_model.clone().map(Into::into),
             computer_use_model: profile.computer_use_model.clone().map(Into::into),
+            base_model_effort: profile.base_model_effort.map(|e| e.as_str().to_string()),
+            coding_model_effort: profile.coding_model_effort.map(|e| e.as_str().to_string()),
+            cli_agent_model_effort: profile.cli_agent_model_effort.map(|e| e.as_str().to_string()),
+            computer_use_model_effort: profile.computer_use_model_effort.map(|e| e.as_str().to_string()),
             context_window_limit: profile.context_window_limit,
             autosync_plans_to_warp_drive: profile.autosync_plans_to_warp_drive,
             web_search_enabled: profile.web_search_enabled,
@@ -557,6 +569,10 @@ impl TryFrom<ExecutionProfileFile> for AIExecutionProfile {
                 .collect()
         }
 
+        fn parse_effort(effort: Option<String>) -> Option<cloud_object_models::ModelEffort> {
+            effort.and_then(|e| cloud_object_models::ModelEffort::from_str(&e))
+        }
+
         Ok(AIExecutionProfile {
             name: file.name,
             // The containing collection derives this from the stable map key.
@@ -578,6 +594,10 @@ impl TryFrom<ExecutionProfileFile> for AIExecutionProfile {
             coding_model: file.coding_model.map(LLMId::from),
             cli_agent_model: file.cli_agent_model.map(LLMId::from),
             computer_use_model: file.computer_use_model.map(LLMId::from),
+            base_model_effort: parse_effort(file.base_model_effort),
+            coding_model_effort: parse_effort(file.coding_model_effort),
+            cli_agent_model_effort: parse_effort(file.cli_agent_model_effort),
+            computer_use_model_effort: parse_effort(file.computer_use_model_effort),
             context_window_limit: file.context_window_limit,
             autosync_plans_to_warp_drive: file.autosync_plans_to_warp_drive,
             web_search_enabled: file.web_search_enabled,

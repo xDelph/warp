@@ -1,0 +1,32 @@
+#!/bin/bash
+# Install ACP binaries if not already installed
+
+set -e
+
+echo "Installing ACP binaries..."
+
+# Install codex-acp if not found
+if ! command -v codex-acp &> /dev/null; then
+    echo "Installing codex-acp..."
+    bun install -g @agentclientprotocol/codex-acp
+else
+    echo "✅ codex-acp already installed: $(which codex-acp)"
+fi
+
+# Install claude-agent-acp if not found
+if ! command -v claude-agent-acp &> /dev/null; then
+    echo "Installing claude-agent-acp..."
+    bun install -g @agentclientprotocol/claude-agent-acp
+else
+    echo "✅ claude-agent-acp already installed: $(which claude-agent-acp)"
+fi
+
+# Install cursor-acp if not found
+if ! command -v cursor-acp &> /dev/null; then
+    echo "Installing cursor-acp..."
+    bun install -g @dircha/cursor-acp
+else
+    echo "✅ cursor-acp already installed: $(which cursor-acp)"
+fi
+
+echo "✅ All ACP binaries installed"

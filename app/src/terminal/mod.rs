@@ -91,11 +91,10 @@ pub use cli_agent::CLIAgent;
 pub(crate) mod cli_agent_sessions;
 
 pub mod pane_allocator;
-pub use pane_allocator::{global_allocator, PaneNameAllocator};
-
 pub use block_list_settings::*;
 pub use mock_terminal_manager::MockTerminalManager;
 use model_events::{ModelEvent, ModelEventDispatcher};
+pub use pane_allocator::{PaneNameAllocator, global_allocator};
 pub use secret_regex_updater::CustomSecretRegexUpdater;
 pub use share_block_modal::{ShareBlockModal, ShareBlockModalEvent, ShareBlockType};
 pub use shell_launch_state::ShellLaunchState;

@@ -449,8 +449,8 @@ impl PaneContent for TerminalPane {
             if let Some(rmux_manager) = terminal_manager
                 .as_ref(app)
                 .as_any()
-                .downcast_ref::<crate::terminal::rmux::RmuxTerminalManager>()
-            {
+                .downcast_ref::<crate::terminal::rmux::RmuxTerminalManager>(
+            ) {
                 return LeafContents::RmuxTerminal(rmux_manager.snapshot(self.uuid.clone(), app));
             }
         }

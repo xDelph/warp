@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use itertools::Itertools as _;
-use markdown_parser::{parse_markdown, FormattedText, FormattedTextFragment, FormattedTextLine};
+use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine, parse_markdown};
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
 use settings::Setting;
@@ -31,8 +31,7 @@ use warpui::{
 use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::{
-    AgentViewController, AgentViewEntryOrigin,
-    ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
+    AgentViewController, AgentViewEntryOrigin, ENTER_AGENT_VIEW_NEW_CONVERSATION_KEYSTROKE,
 };
 use crate::ai::blocklist::history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel};
 use crate::ai::conversation_navigation::ConversationNavigationData;

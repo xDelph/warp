@@ -3,8 +3,8 @@ use std::sync::Arc;
 use pathfinder_geometry::vector::vec2f;
 use warp_cli::agent::Harness;
 use warp_core::ui::appearance::Appearance;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
     Border, ChildAnchor, ChildView, OffsetPositioning, ParentAnchor, ParentElement,
     ParentOffsetBounds, Stack,

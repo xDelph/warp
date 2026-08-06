@@ -2467,7 +2467,8 @@ impl View for CodeDiffView {
         }
 
         if is_expanded {
-            if !matches!(self.state, CodeDiffState::ViewOnly { .. }) || self.pending_diffs.len() > 1 {
+            if !matches!(self.state, CodeDiffState::ViewOnly { .. }) || self.pending_diffs.len() > 1
+            {
                 flex.add_child(self.render_file_selection(appearance, app));
             }
             flex.add_child(self.render_editor(appearance, app));

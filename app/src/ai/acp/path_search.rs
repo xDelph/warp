@@ -149,7 +149,11 @@ fn version_manager_bin_paths(root: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::{first_usable_codex_acp_path, is_deprecated_zed_codex_acp_path};
 
-    fn codex_acp_symlink(temp: &tempfile::TempDir, package: &str, link_name: &str) -> std::path::PathBuf {
+    fn codex_acp_symlink(
+        temp: &tempfile::TempDir,
+        package: &str,
+        link_name: &str,
+    ) -> std::path::PathBuf {
         let target = temp
             .path()
             .join("node_modules")

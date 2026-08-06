@@ -3,9 +3,10 @@
 //! Converts Warp's ACP output to match acpx's structured transcript format
 //! for better display consistency and integration with acpx tooling.
 
-use crate::ai::agent::conversation::LocalAcpStreamChunk;
 use serde::{Deserialize, Serialize};
 use warp_cli::agent::Harness;
+
+use crate::ai::agent::conversation::LocalAcpStreamChunk;
 
 /// acpx-style transcript entry types that match the acpx output format
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +55,9 @@ fn extract_text_from_agent_text(text: &crate::ai::agent::AIAgentText) -> String 
     text.sections
         .iter()
         .filter_map(|section| match section {
-            crate::ai::agent::AIAgentTextSection::PlainText { text } => Some(text.text().to_string()),
+            crate::ai::agent::AIAgentTextSection::PlainText { text } => {
+                Some(text.text().to_string())
+            }
             _ => None,
         })
         .collect()
@@ -67,7 +70,7 @@ pub fn convert_to_acpx_transcript(
     session_id: &str,
 ) -> Vec<AcpxTranscriptEntry> {
     let mut transcript = Vec::new();
-    
+
     // Add session metadata entry
     transcript.push(AcpxTranscriptEntry::Session {
         agent: harness.display_name().to_string(),
@@ -99,7 +102,11 @@ pub fn convert_to_acpx_transcript(
                     name: call.title.clone(),
                     tool_call_id: call.tool_call_id.clone(),
                     status: "running".to_string(),
-                    text: if tool_text.is_empty() { None } else { Some(tool_text) },
+                    text: if tool_text.is_empty() {
+                        None
+                    } else {
+                        Some(tool_text)
+                    },
                     input: None,
                 });
             }
@@ -112,7 +119,7 @@ pub fn convert_to_acpx_transcript(
 /// Formats acpx transcript entries for human-readable display in Warp
 pub fn format_acpx_transcript_for_display(entries: &[AcpxTranscriptEntry]) -> String {
     let mut output = String::new();
-    
+
     for entry in entries {
         match entry {
             AcpxTranscriptEntry::Session { agent, .. } => {
@@ -121,35 +128,33 @@ pub fn format_acpx_transcript_for_display(entries: &[AcpxTranscriptEntry]) -> St
             AcpxTranscriptEntry::Status { tag, values } => {
                 output.push_str(&format!("[status] {}: {}\n", tag, values));
             }
-            AcpxTranscriptEntry::TextDelta { text, channel, .. } => {
-                match channel.as_str() {
-                    "thought" => output.push_str(&format!("[thinking] {}\n", text)),
-                    "output" => output.push_str(text),
-                    _ => output.push_str(text),
+            AcpxTranscriptEntry::TextDelta { text, channel, .. } => match channel.as_str() {
+                "thought" => output.push_str(&format!("[thinking] {}\n", text)),
+                "output" => output.push_str(text),
+                _ => output.push_str(text),
+            },
+            AcpxTranscriptEntry::ToolCall {
+                name, status, text, ..
+            } => match status.as_str() {
+                "running" => {
+                    if let Some(t) = text {
+                        output.push_str(&format!("[tool] {} {}\n", name, t));
+                    } else {
+                        output.push_str(&format!("[tool] {} (running)\n", name));
+                    }
                 }
-            }
-            AcpxTranscriptEntry::ToolCall { name, status, text, .. } => {
-                match status.as_str() {
-                    "running" => {
-                        if let Some(t) = text {
-                            output.push_str(&format!("[tool] {} {}\n", name, t));
-                        } else {
-                            output.push_str(&format!("[tool] {} (running)\n", name));
-                        }
-                    }
-                    "completed" => {
-                        output.push_str(&format!("[tool] {} completed\n", name));
-                    }
-                    "failed" => {
-                        if let Some(t) = text {
-                            output.push_str(&format!("[tool] {} failed: {}\n", name, t));
-                        } else {
-                            output.push_str(&format!("[tool] {} failed\n", name));
-                        }
-                    }
-                    _ => {}
+                "completed" => {
+                    output.push_str(&format!("[tool] {} completed\n", name));
                 }
-            }
+                "failed" => {
+                    if let Some(t) = text {
+                        output.push_str(&format!("[tool] {} failed: {}\n", name, t));
+                    } else {
+                        output.push_str(&format!("[tool] {} failed\n", name));
+                    }
+                }
+                _ => {}
+            },
             AcpxTranscriptEntry::Done { error: None } => {
                 output.push_str("[done]\n");
             }
@@ -158,6 +163,6 @@ pub fn format_acpx_transcript_for_display(entries: &[AcpxTranscriptEntry]) -> St
             }
         }
     }
-    
+
     output
 }

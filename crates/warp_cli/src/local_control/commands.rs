@@ -208,10 +208,9 @@ fn render_human_readable(action: ActionKind, data: &serde_json::Value) -> String
             "Split created pane {}",
             nested_value_or_unknown(data, &["pane", "id"])
         ),
-        ActionKind::InputInsert | ActionKind::InputRun => format!(
-            "Delivered to pane {}",
-            value_or_unknown(data, "pane_uuid")
-        ),
+        ActionKind::InputInsert | ActionKind::InputRun => {
+            format!("Delivered to pane {}", value_or_unknown(data, "pane_uuid"))
+        }
         ActionKind::TabRename => format!(
             "Renamed tab {} to {:?}",
             nested_value_or_unknown(data, &["tab", "index"]),

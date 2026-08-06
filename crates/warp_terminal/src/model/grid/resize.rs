@@ -200,7 +200,10 @@ impl InitialCursorState {
             #[cfg(debug_assertions)]
             eprintln!(
                 "cursor should not be outside the bounds of the grid! row={}, col={}, total_rows={}, columns={}",
-                cursor_point.row, cursor_point.col, grid.total_rows(), grid.columns()
+                cursor_point.row,
+                cursor_point.col,
+                grid.total_rows(),
+                grid.columns()
             );
             cursor_point.row.0 = grid.visible_rows() - 1;
         }
@@ -208,7 +211,10 @@ impl InitialCursorState {
             #[cfg(debug_assertions)]
             eprintln!(
                 "cursor should not be outside the bounds of the grid! row={}, col={}, total_rows={}, columns={}",
-                cursor_point.row, cursor_point.col, grid.total_rows(), grid.columns()
+                cursor_point.row,
+                cursor_point.col,
+                grid.total_rows(),
+                grid.columns()
             );
             cursor_point.col = grid.columns() - 1;
         }

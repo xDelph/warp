@@ -210,8 +210,7 @@ pub(crate) fn try_dispatch_team_prompt<V: View>(
                     .members
                     .iter()
                     .filter(|member| {
-                        target_member
-                            .is_none_or(|target| member.name.eq_ignore_ascii_case(target))
+                        target_member.is_none_or(|target| member.name.eq_ignore_ascii_case(target))
                     })
                     .cloned()
                     .collect();
@@ -283,20 +282,25 @@ pub(crate) fn try_dispatch_team_prompt<V: View>(
         }
         let member_prompt = member_prompt(&team_name, member, task);
         let started = member.terminal_view.update(ctx, |terminal_view, ctx| {
-            terminal_view.ai_controller().update(ctx, |controller, ctx| {
-                controller.start_local_acp_request_in_conversation(
-                    member_prompt.clone(),
-                    member.conversation_id,
-                    ctx,
-                )
-            })
+            terminal_view
+                .ai_controller()
+                .update(ctx, |controller, ctx| {
+                    controller.start_local_acp_request_in_conversation(
+                        member_prompt.clone(),
+                        member.conversation_id,
+                        ctx,
+                    )
+                })
         });
         let Some((member_conversation_id, member_stream_id)) = started else {
             append_lead_stream_text(
                 &lead_stream_id,
                 lead_conversation_id,
                 lead_terminal_view_id,
-                format!("\n\n### ❌ {} failed\nCould not start the member request.", member.name),
+                format!(
+                    "\n\n### ❌ {} failed\nCould not start the member request.",
+                    member.name
+                ),
                 ctx,
             );
             continue;
@@ -390,9 +394,7 @@ fn parse_member_target(prompt: &str) -> (Option<&str>, &str) {
     let Some(rest) = trimmed.strip_prefix('@') else {
         return (None, prompt);
     };
-    let name_end = rest
-        .find(char::is_whitespace)
-        .unwrap_or(rest.len());
+    let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let (name, task) = rest.split_at(name_end);
     if name.is_empty() {
         return (None, prompt);

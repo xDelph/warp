@@ -12,7 +12,7 @@ use parking_lot::FairMutex;
 use rmux_sdk::TerminalSizeSpec;
 use warpui::{Entity, ModelContext, WeakViewHandle};
 
-use super::client::{connect_rmux_pane, RmuxPaneClient};
+use super::client::{RmuxPaneClient, connect_rmux_pane};
 use super::grid::render_pane_snapshot_as_ansi;
 use super::input::RmuxInputAction;
 use super::types::RmuxPaneSpec;
@@ -79,7 +79,9 @@ impl EventLoop {
         match result {
             Ok((client, pane_id)) => {
                 self.pane_id = pane_id.or(self.pane_id);
-                ctx.emit(EventLoopEvent::Connected { pane_id: self.pane_id });
+                ctx.emit(EventLoopEvent::Connected {
+                    pane_id: self.pane_id,
+                });
                 self.attach_client(client, ctx);
             }
             Err(error) => {
@@ -124,9 +126,7 @@ impl EventLoop {
                     match client.next_render_update().await {
                         Ok(Some(update)) => {
                             if update.lagged {
-                                log::warn!(
-                                    "RMUX pane render stream lagged; forcing a full resync"
-                                );
+                                log::warn!("RMUX pane render stream lagged; forcing a full resync");
                             }
                             apply_snapshot(&model, &update.snapshot);
                             listener.send_wakeup_event();

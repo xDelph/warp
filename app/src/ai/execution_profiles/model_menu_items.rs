@@ -16,6 +16,7 @@ use crate::ai::llms::{
     should_show_gemini_enterprise_agent_platform_icon_for_model, should_show_key_icon_for_model,
 };
 use crate::menu::{MenuItem, MenuItemFields, MenuTooltipPosition};
+use crate::settings::AISettings;
 use crate::workspaces::user_workspaces::TeamScope;
 
 pub fn is_auto(llm: &LLMInfo) -> bool {
@@ -93,6 +94,7 @@ fn make_item_fields<A: Action + Clone>(
     model_id_to_add_profile_default_label_to: Option<&LLMId>,
     collapse: CollapsedModelVariants,
     scope: &dyn TeamScope,
+    is_favorite: bool,
     app: &AppContext,
 ) -> MenuItem<A> {
     let is_auto_model = is_auto(llm);
@@ -119,6 +121,7 @@ fn make_item_fields<A: Action + Clone>(
     );
     let is_using_cloud_host = is_using_bedrock || is_using_gemini_enterprise_agent_platform;
     let trailing_credential_icon = (!is_using_cloud_host && is_using_api_key).then_some(Icon::Key);
+    let trailing_favorite_icon = is_favorite.then_some(Icon::Stars);
 
     let mut item = if let Some(position_id_fn) = position_id_fn {
         let position_id = position_id_fn(&llm.id);
@@ -168,12 +171,30 @@ fn make_item_fields<A: Action + Clone>(
                     .finish();
                     item_row.add_child(credential_icon);
                 }
+                if let Some(icon) = trailing_favorite_icon {
+                    let favorite_icon = Container::new(
+                        ConstrainedBox::new(
+                            icon.to_warpui_icon(appearance.theme().foreground())
+                                .finish(),
+                        )
+                        .with_height(appearance.ui_font_size())
+                        .with_width(appearance.ui_font_size())
+                        .finish(),
+                    )
+                    .with_margin_left(6.)
+                    .finish();
+                    item_row.add_child(favorite_icon);
+                }
                 SavePosition::new(item_row.finish(), &position_id).finish()
             }),
             None,
         )
     } else {
-        MenuItemFields::new(label).with_icon(leading_icon)
+        let mut item = MenuItemFields::new(label).with_icon(leading_icon);
+        if let Some(icon) = trailing_favorite_icon {
+            item = item.with_right_side_icon(icon);
+        }
+        item
     };
 
     item = item
@@ -204,10 +225,21 @@ pub fn available_model_menu_items<A: Action + Clone>(
     app: &AppContext,
 ) -> Vec<MenuItem<A>> {
     let prefs = LLMPreferences::as_ref(app);
+    let favorite_model_ids = AISettings::as_ref(app).get_favorite_models();
+    let favorite_ids: std::collections::HashSet<&str> =
+        favorite_model_ids.iter().map(|s| s.as_str()).collect();
+
+    let mut choices = choices;
+    choices.sort_by(|a, b| {
+        let a_is_favorite = favorite_ids.contains(a.id.as_str());
+        let b_is_favorite = favorite_ids.contains(b.id.as_str());
+        b_is_favorite.cmp(&a_is_favorite)
+    });
     choices
         .into_iter()
         .filter(|llm| is_model_allowed_for_scope(prefs, llm, scope, app))
         .map(|llm| {
+            let is_favorite = favorite_ids.contains(llm.id.as_str());
             make_item_fields(
                 llm,
                 &action,
@@ -215,6 +247,7 @@ pub fn available_model_menu_items<A: Action + Clone>(
                 model_id_to_add_profile_default_label_to,
                 collapse,
                 scope,
+                is_favorite,
                 app,
             )
         })

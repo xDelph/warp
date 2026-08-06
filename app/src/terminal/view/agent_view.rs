@@ -304,10 +304,7 @@ impl TerminalView {
                 if self.execute_local_acp_query(initial_prompt.clone(), ctx) {
                     did_auto_trigger_request = true;
                 } else if crate::ai::local_acp::cloud_agent_disabled(ctx) {
-                    self.show_error_toast(
-                        "Couldn't start local ACP agent.".to_string(),
-                        ctx,
-                    );
+                    self.show_error_toast("Couldn't start local ACP agent.".to_string(), ctx);
                 } else {
                     self.ai_controller.update(ctx, |controller, ctx| {
                         controller.send_user_query_in_conversation(

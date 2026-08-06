@@ -8057,16 +8057,13 @@ impl TerminalView {
         let cwd = self
             .active_session_path_if_local(ctx)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let (harness, model_id) =
-            crate::ai::acp::harness_picker::LocalAcpHarnessModel::handle(ctx).update(
-                ctx,
-                |model, _ctx| {
-                    (
-                        model.selected_harness(),
-                        model.selected_model_id().map(ToOwned::to_owned),
-                    )
-                },
-            );
+        let (harness, model_id) = crate::ai::acp::harness_picker::LocalAcpHarnessModel::handle(ctx)
+            .update(ctx, |model, _ctx| {
+                (
+                    model.selected_harness(),
+                    model.selected_model_id().map(ToOwned::to_owned),
+                )
+            });
 
         if let Err(error) = crate::ai::acp::submit::try_submit_local_acp_query(
             prompt,
@@ -8078,10 +8075,7 @@ impl TerminalView {
             self.view_id,
             ctx,
         ) {
-            self.show_error_toast(
-                format!("Couldn't start local ACP agent: {error:#}"),
-                ctx,
-            );
+            self.show_error_toast(format!("Couldn't start local ACP agent: {error:#}"), ctx);
             return false;
         }
 

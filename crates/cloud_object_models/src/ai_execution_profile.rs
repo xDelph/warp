@@ -175,6 +175,54 @@ pub enum AskUserQuestionPermission {
     Unknown,
 }
 
+/// Model reasoning effort level for extended thinking/reasoning models.
+///
+/// Controls how much computational effort the model spends on reasoning.
+/// Higher effort levels produce more thorough reasoning but are slower and more expensive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelEffort {
+    /// Low effort: faster, less expensive, less thorough reasoning.
+    Low,
+    /// Medium effort: balanced speed and reasoning quality.
+    Medium,
+    /// High effort: slower, more expensive, most thorough reasoning.
+    High,
+}
+
+impl Default for ModelEffort {
+    fn default() -> Self {
+        Self::Medium
+    }
+}
+
+impl ModelEffort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ModelEffort::Low => "low",
+            ModelEffort::Medium => "medium",
+            ModelEffort::High => "high",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "low" => Some(ModelEffort::Low),
+            "medium" => Some(ModelEffort::Medium),
+            "high" => Some(ModelEffort::High),
+            _ => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ModelEffort::Low => "Low",
+            ModelEffort::Medium => "Medium",
+            ModelEffort::High => "High",
+        }
+    }
+}
+
 impl AskUserQuestionPermission {
     pub fn label(&self) -> &'static str {
         match self {
@@ -382,6 +430,15 @@ pub struct AIExecutionProfile {
     pub cli_agent_model: Option<LLMId>,
     pub computer_use_model: Option<LLMId>,
 
+    /// Reasoning effort level for the base model.
+    pub base_model_effort: Option<ModelEffort>,
+    /// Reasoning effort level for the coding model.
+    pub coding_model_effort: Option<ModelEffort>,
+    /// Reasoning effort level for the CLI agent model.
+    pub cli_agent_model_effort: Option<ModelEffort>,
+    /// Reasoning effort level for the computer use model.
+    pub computer_use_model_effort: Option<ModelEffort>,
+
     pub context_window_limit: Option<u32>,
 
     /// Whether plans created by the agent should be automatically synced to Warp Drive
@@ -413,6 +470,10 @@ impl Default for AIExecutionProfile {
             coding_model: None,
             cli_agent_model: None,
             computer_use_model: None,
+            base_model_effort: None,
+            coding_model_effort: None,
+            cli_agent_model_effort: None,
+            computer_use_model_effort: None,
             context_window_limit: None,
             autosync_plans_to_warp_drive: true,
             web_search_enabled: true,
@@ -452,6 +513,10 @@ impl AIExecutionProfile {
             coding_model: None,
             cli_agent_model: None,
             computer_use_model: None,
+            base_model_effort: None,
+            coding_model_effort: None,
+            cli_agent_model_effort: None,
+            computer_use_model_effort: None,
             context_window_limit: None,
             autosync_plans_to_warp_drive: false,
             web_search_enabled: true,
@@ -508,6 +573,10 @@ impl AIExecutionProfile {
             coding_model: None,
             cli_agent_model: None,
             computer_use_model: None,
+            base_model_effort: None,
+            coding_model_effort: None,
+            cli_agent_model_effort: None,
+            computer_use_model_effort: None,
             context_window_limit: None,
             autosync_plans_to_warp_drive: FeatureFlag::SyncAmbientPlans.is_enabled(),
             web_search_enabled: true,

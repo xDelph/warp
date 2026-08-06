@@ -2,21 +2,22 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread;
 
-use anyhow::{anyhow, Context, Result};
+use agent_client_protocol as acp;
+use anyhow::{Context, Result, anyhow};
+use async_channel;
 use async_process::Command;
 use futures::StreamExt;
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, oneshot};
 use warp_cli::agent::Harness;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
-use {agent_client_protocol as acp, async_channel};
 
 use super::connection::Connection;
 use super::session_store::LocalAcpSessionStore;
 use super::{path_search, registry, tool_calls};
+use crate::ai::agent::RenderableAIError;
 use crate::ai::agent::conversation::{AIConversationId, LocalAcpStreamChunk};
 use crate::ai::agent::local_acp_tool_call::LocalAcpToolCallMessage;
-use crate::ai::agent::RenderableAIError;
 use crate::ai::blocklist::{BlocklistAIHistoryModel, ResponseStreamId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,7 +348,9 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
                             session = Some(warm_session);
                         }
                         Err(error) => {
-                            log::debug!("failed to prewarm local ACP session for {harness}: {error:#}");
+                            log::debug!(
+                                "failed to prewarm local ACP session for {harness}: {error:#}"
+                            );
                         }
                     }
                 }
@@ -773,7 +776,10 @@ mod tests {
             cwd: "~/sync/$(reboot)".to_string(),
         };
         let args = remote_ssh_args(&remote, "codex-acp", &[]);
-        assert_eq!(args[4], r#"bash -lc "cd ~/sync/\$(reboot) && exec codex-acp""#);
+        assert_eq!(
+            args[4],
+            r#"bash -lc "cd ~/sync/\$(reboot) && exec codex-acp""#
+        );
 
         let remote = LocalAcpRemoteTarget {
             host: "genesis".to_string(),
@@ -868,8 +874,14 @@ mod tests {
             .expect("teammate-2 worker returned a result")
             .expect("teammate-2 prompt succeeded");
 
-        eprintln!("teammate-1 ({}): {}", result_1.session_id, result_1.final_text);
-        eprintln!("teammate-2 ({}): {}", result_2.session_id, result_2.final_text);
+        eprintln!(
+            "teammate-1 ({}): {}",
+            result_1.session_id, result_1.final_text
+        );
+        eprintln!(
+            "teammate-2 ({}): {}",
+            result_2.session_id, result_2.final_text
+        );
 
         assert_ne!(
             result_1.session_id, result_2.session_id,

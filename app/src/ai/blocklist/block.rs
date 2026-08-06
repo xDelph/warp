@@ -3543,8 +3543,11 @@ impl AIBlock {
             .as_ref(ctx)
             .current_working_directory()
             .cloned();
-        let file_diffs =
-            file_diffs_from_local_acp_diffs(&tool_call.diffs, &self.shell_launch_data, &current_working_directory);
+        let file_diffs = file_diffs_from_local_acp_diffs(
+            &tool_call.diffs,
+            &self.shell_launch_data,
+            &current_working_directory,
+        );
 
         if let Some(existing) = self.local_acp_edits.get(message_id) {
             if !existing.view.as_ref(ctx).is_pending_diffs_empty() {
@@ -3557,13 +3560,9 @@ impl AIBlock {
             return;
         }
 
-        let action_id = AIAgentActionId::from(format!(
-            "local-acp-edit-{}",
-            tool_call.tool_call_id
-        ));
-        let view = ctx.add_typed_action_view(|ctx| {
-            CodeDiffView::new_view_only(&action_id, None, ctx)
-        });
+        let action_id = AIAgentActionId::from(format!("local-acp-edit-{}", tool_call.tool_call_id));
+        let view =
+            ctx.add_typed_action_view(|ctx| CodeDiffView::new_view_only(&action_id, None, ctx));
         view.update(ctx, |view, ctx| {
             view.set_candidate_diffs(file_diffs, ctx);
         });
@@ -7380,11 +7379,8 @@ fn file_diffs_from_local_acp_diffs(
     diffs
         .iter()
         .map(|diff| {
-            let path = host_native_absolute_path(
-                &diff.path,
-                shell_launch_data,
-                current_working_directory,
-            );
+            let path =
+                host_native_absolute_path(&diff.path, shell_launch_data, current_working_directory);
             let on_disk = std::fs::read_to_string(&path).ok();
             let (old_full, new_full) = crate::ai::acp::diff_window::resolve_edit_old_new(
                 diff.old_text.clone(),

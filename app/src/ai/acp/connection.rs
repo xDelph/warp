@@ -9,12 +9,12 @@ use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
+use acp::Agent as _;
 use agent_client_protocol as acp;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_fs;
 use async_process::{Child, Command, Stdio};
 use futures::channel::{mpsc, oneshot};
-use acp::Agent as _;
 
 #[derive(Clone, Debug, Default)]
 struct SessionUpdateBroadcaster {
@@ -146,26 +146,34 @@ impl Connection {
         let mut child = command
             .spawn()
             .map_err(|source| anyhow::anyhow!("Failed to spawn process: {source}"))?;
-        let outgoing = child.stdin.take().ok_or_else(|| anyhow!("Missing child stdin"))?;
-        let incoming = child.stdout.take().ok_or_else(|| anyhow!("Missing child stdout"))?;
+        let outgoing = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Missing child stdin"))?;
+        let incoming = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Missing child stdout"))?;
         let session_updates = SessionUpdateBroadcaster::default();
         let cwd = command
             .get_current_dir()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
         let client = ConnectionClient::new(session_updates.clone(), cwd);
-        
-        let (connection, io_task) = acp::ClientSideConnection::new(
-            client, 
-            outgoing, 
-            incoming, 
-            |task| { tokio::task::spawn_local(task); }
-        );
+
+        let (connection, io_task) =
+            acp::ClientSideConnection::new(client, outgoing, incoming, |task| {
+                tokio::task::spawn_local(task);
+            });
         let connection = Rc::new(connection);
         let (io_task_tx, io_task_rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            let _ = io_task_tx.send(io_task.await.map_err(|e| anyhow::anyhow!("IO task error: {e}")));
+            let _ = io_task_tx.send(
+                io_task
+                    .await
+                    .map_err(|e| anyhow::anyhow!("IO task error: {e}")),
+            );
         });
 
         Ok(Self {
@@ -299,7 +307,11 @@ impl Connection {
     }
 
     fn connection(&self) -> Result<Rc<acp::ClientSideConnection>> {
-        self.state.borrow().connection.clone().ok_or_else(|| anyhow!("Connection closed"))
+        self.state
+            .borrow()
+            .connection
+            .clone()
+            .ok_or_else(|| anyhow!("Connection closed"))
     }
 }
 

@@ -52,7 +52,10 @@ impl AcpxSessionOwner {
     /// Mark a session as active (called on each prompt)
     pub fn touch_session(&self, harness: Harness, session_id: &str) {
         let mut sessions = self.active_sessions.lock().unwrap();
-        if let Some(session) = sessions.iter_mut().find(|s| s.harness == harness && s.session_id == session_id) {
+        if let Some(session) = sessions
+            .iter_mut()
+            .find(|s| s.harness == harness && s.session_id == session_id)
+        {
             session.last_activity = Instant::now();
         }
     }
@@ -67,9 +70,11 @@ impl AcpxSessionOwner {
     /// Check if a session is active and warm
     pub fn is_session_warm(&self, harness: Harness, session_id: &str) -> bool {
         let sessions = self.active_sessions.lock().unwrap();
-        sessions
-            .iter()
-            .any(|s| s.harness == harness && s.session_id == session_id && s.last_activity.elapsed() < self.ttl)
+        sessions.iter().any(|s| {
+            s.harness == harness
+                && s.session_id == session_id
+                && s.last_activity.elapsed() < self.ttl
+        })
     }
 
     /// Get the number of active sessions

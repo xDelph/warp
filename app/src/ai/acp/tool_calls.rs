@@ -98,10 +98,7 @@ fn map_tool_call_fields(
         return map_content(kind, content, raw_output, title, locations);
     }
 
-    (
-        map_raw_fields_only(kind, raw_input, raw_output),
-        Vec::new(),
-    )
+    (map_raw_fields_only(kind, raw_input, raw_output), Vec::new())
 }
 
 fn map_content(
@@ -112,7 +109,10 @@ fn map_content(
     locations: &[String],
 ) -> (AIAgentText, Vec<LocalAcpDiff>) {
     match kind {
-        LocalAcpToolKind::Edit => (AIAgentText { sections: vec![] }, diffs_from_content(content)),
+        LocalAcpToolKind::Edit => (
+            AIAgentText { sections: vec![] },
+            diffs_from_content(content),
+        ),
         LocalAcpToolKind::Execute => (
             body_from_execute(content, raw_output, Some(title)),
             Vec::new(),
