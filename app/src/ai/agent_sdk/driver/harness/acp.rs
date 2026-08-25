@@ -76,6 +76,13 @@ impl ThirdPartyHarness for AcpHarness {
         })
     }
 
+    /// Returns `Err(InvalidRuntimeState)` because the local ACP path does not
+    /// use the `HarnessRunner` abstraction.  Prompt execution is handled by
+    /// `LocalAcpSubmitModel` → `acpx_runner` → ACPX subprocess, which streams
+    /// NDJSON directly into the blocklist exchange.  This stub exists only to
+    /// satisfy the `ThirdPartyHarness` trait contract.
+    // TODO(local-acp): either implement `HarnessRunner` for ACP or remove
+    // `ThirdPartyHarness` usage in favor of the submit-model path.
     #[allow(clippy::too_many_arguments)]
     fn build_runner(
         &self,

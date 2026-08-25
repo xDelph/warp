@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-pub(crate) mod connection;
+pub(crate) mod acpx_runner;
 pub(crate) mod context_handoff;
 pub(crate) mod diff_window;
 pub(crate) mod harness_picker;

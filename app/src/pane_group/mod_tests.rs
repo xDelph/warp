@@ -772,6 +772,35 @@ fn test_pane_focus_on_close() {
     });
 }
 
+#[cfg(all(feature = "local_tty", feature = "rmux_native_pane"))]
+#[test]
+fn test_normal_split_creates_rmux_terminal_pane() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+        let pane_group = mock_pane_group(&mut app, Default::default());
+
+        pane_group.update(&mut app, |panes, ctx| {
+            let original_pane_id = get_newly_created_pane_id(panes, &[]);
+
+            // This is the same path used by the regular Split Pane actions.
+            panes.add_terminal_pane(Direction::Right, None, ctx);
+            let split_pane_id = get_newly_created_pane_id(panes, &[original_pane_id]);
+            let split_pane = panes
+                .downcast_pane_by_id::<TerminalPane>(split_pane_id)
+                .expect("normal split should create a terminal pane");
+            let terminal_manager = split_pane.terminal_manager(ctx);
+
+            assert!(
+                terminal_manager
+                    .as_ref(ctx)
+                    .as_any()
+                    .is::<crate::terminal::rmux::RmuxTerminalManager>(),
+                "normal local splits must use RmuxTerminalManager"
+            );
+        });
+    });
+}
+
 #[test]
 fn test_insert_hidden_child_agent_pane_keeps_focus_and_active_session() {
     App::test((), |mut app| async move {

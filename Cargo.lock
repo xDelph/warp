@@ -258,37 +258,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-client-protocol"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10eeef5e80864f9c3c148a3f395c3e35a66d37ec7561c7845b2bffae8e841759"
-dependencies = [
- "agent-client-protocol-schema",
- "anyhow",
- "async-broadcast",
- "async-trait",
- "derive_more 2.1.1",
- "futures",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agent-client-protocol-schema"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca68e7e55681ce56546c0cecc6bc8f20493d24b44c6d93ec46174f310730bba2"
-dependencies = [
- "anyhow",
- "derive_more 2.1.1",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "strum 0.28.0",
-]
-
-[[package]]
 name = "aha-reqwest-eventsource"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15786,7 +15755,6 @@ name = "warp"
 version = "0.1.0"
 dependencies = [
  "addr",
- "agent-client-protocol",
  "aha-reqwest-eventsource",
  "aho-corasick",
  "ai",

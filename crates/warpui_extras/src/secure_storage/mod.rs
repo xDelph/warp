@@ -9,6 +9,7 @@
 #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), path = "linux.rs")]
 #[cfg_attr(target_os = "windows", path = "windows.rs")]
 mod imp;
+mod file;
 mod noop;
 mod unavailable;
 
@@ -92,6 +93,23 @@ pub fn register_with_dir(
 ) {
     ctx.add_singleton_model(|_| -> Model {
         Box::new(imp::SecureStorage::new_with_path(service_name, storage_dir))
+    });
+}
+
+/// Registers a file-based Secure Storage provider for macOS debug builds.
+///
+/// Debug builds are ad-hoc signed, so the cdhash changes every rebuild and
+/// the Keychain ACL (which pins the signing identity) prompts for the login
+/// password on every launch.  This provider stores secrets in a JSON file
+/// with 0600 permissions, avoiding the keychain entirely.
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn register_with_dir(
+    service_name: &str,
+    storage_dir: std::path::PathBuf,
+    ctx: &mut warpui_core::AppContext,
+) {
+    ctx.add_singleton_model(|_| -> Model {
+        Box::new(file::SecureStorage::new(service_name, storage_dir))
     });
 }
 

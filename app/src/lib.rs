@@ -1531,6 +1531,12 @@ pub(crate) fn initialize_app(
                 warpui_extras::secure_storage::register_with_fallback(&secure_storage_service_name, warp_core::paths::state_dir(), ctx)
             } else if #[cfg(target_os = "windows")] {
                 warpui_extras::secure_storage::register_with_dir(&secure_storage_service_name, warp_core::paths::state_dir(), ctx)
+            } else if #[cfg(all(target_os = "macos", debug_assertions))] {
+                // Debug builds are ad-hoc signed; the cdhash changes every rebuild,
+                // so the Keychain ACL (which pins the signing identity) prompts for
+                // the login password on every launch.  Use file-based storage —
+                // same as Windows — to avoid the repeated admin prompt.
+                warpui_extras::secure_storage::register_with_dir(&secure_storage_service_name, warp_core::paths::state_dir(), ctx)
             } else {
                 warpui_extras::secure_storage::register(&secure_storage_service_name, ctx);
             }

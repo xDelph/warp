@@ -54,8 +54,9 @@ fn codex_remains_product_disabled() {
 #[cfg(all(feature = "local_acp", not(target_family = "wasm")))]
 #[test]
 fn local_acp_uses_acp_binary_names() {
-    let installed =
-        |command: &str| matches!(command, "claude-agent-acp" | "codex-acp" | "cursor-acp");
+    // All local ACP harnesses now route through the `acpx` CLI wrapper rather
+    // than per-agent binaries. A single `acpx` install enables every harness.
+    let installed = |command: &str| command == "acpx";
 
     assert_eq!(
         local_acp_harness_setup_state_with_command_resolver(Harness::Claude, installed),
@@ -71,9 +72,7 @@ fn local_acp_uses_acp_binary_names() {
     );
     assert_eq!(
         local_acp_harness_setup_state_with_command_resolver(Harness::Gemini, installed),
-        LocalHarnessSetupState::MissingHarness {
-            tooltip: LOCAL_ACP_HARNESS_INSTALLATION_REQUIRED_TOOLTIP,
-        }
+        LocalHarnessSetupState::Ready
     );
 }
 

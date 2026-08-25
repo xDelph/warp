@@ -2,17 +2,20 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread;
 
-use agent_client_protocol as acp;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use async_channel;
 use async_process::Command;
-use futures::StreamExt;
-use serde_json::{Map, Value};
+use futures::{
+    StreamExt,
+    io::{AsyncBufReadExt, BufReader},
+};
 use tokio::sync::{mpsc, oneshot};
 use warp_cli::agent::Harness;
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
 
-use super::connection::Connection;
+use super::acpx_runner::{
+    AcpxCommand, AcpxFrame, AcpxPermissionMode, AcpxSessionUpdate, parse_acpx_frame,
+};
 use super::session_store::LocalAcpSessionStore;
 use super::{path_search, registry, tool_calls};
 use crate::ai::agent::RenderableAIError;
@@ -290,7 +293,10 @@ impl LocalAcpWorkerKey {
             harness: request.harness,
             cwd: request.cwd.clone(),
             remote: request.remote.clone(),
-            tag: request.worker_tag,
+            // ACPX session names are conversation-scoped. Keep the worker
+            // scoped the same way so a second conversation never inherits
+            // the first conversation's named ACPX session.
+            tag: Some(request.worker_tag.unwrap_or(request.conversation_id)),
         }
     }
 }
@@ -307,15 +313,10 @@ struct LocalAcpSubmitJob {
 }
 
 struct LocalAcpWorkerSession {
-    connection: Connection,
-    session_id: acp::SessionId,
-    config_options: Option<Vec<acp::SessionConfigOption>>,
-    /// The agent reported its models through the session `models` field
-    /// (newer ACP spec shape, e.g. codex-acp, cursor-agent) — model selection
-    /// then goes through `session/set_model`, not config options.
-    has_session_models: bool,
+    harness: Harness,
+    cwd: PathBuf,
+    session_name: String,
     applied_model_id: Option<String>,
-    applied_mode: Option<String>,
 }
 
 fn spawn_local_acp_worker() -> mpsc::UnboundedSender<LocalAcpWorkerRequest> {
@@ -342,7 +343,16 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
             LocalAcpWorkerRequest::Submit(job) => job,
             LocalAcpWorkerRequest::WarmUp { harness, cwd } => {
                 if session.is_none() {
-                    match start_local_acp_session(harness, &cwd, None, None, None).await {
+                    match start_local_acp_session(
+                        harness,
+                        &cwd,
+                        None,
+                        None,
+                        None,
+                        format!("warp-{}-prewarm", harness.to_string().to_ascii_lowercase()),
+                    )
+                    .await
+                    {
                         Ok(warm_session) => {
                             log::debug!("prewarmed local ACP session for {harness} in {cwd:?}");
                             session = Some(warm_session);
@@ -360,19 +370,9 @@ async fn run_local_acp_worker(mut rx: mpsc::UnboundedReceiver<LocalAcpWorkerRequ
         let result =
             submit_local_acp_query_on_worker(&mut session, job.request, job.stream_tx).await;
         if result.is_err() {
-            if let Some(session) = session.take() {
-                if let Err(error) = session.connection.close().await {
-                    log::debug!("Failed to close failed local ACP connection: {error:#}");
-                }
-            }
+            session.take();
         }
         let _ = job.result_tx.send(result);
-    }
-
-    if let Some(session) = session {
-        if let Err(error) = session.connection.close().await {
-            log::debug!("Failed to close local ACP connection: {error:#}");
-        }
     }
 }
 
@@ -389,6 +389,11 @@ async fn submit_local_acp_query_on_worker(
                 request.model_id.as_deref(),
                 request.gemini_api_key.as_deref(),
                 request.remote.as_ref(),
+                acpx_session_name(
+                    request.harness,
+                    request.conversation_id,
+                    request.worker_tag.is_some(),
+                ),
             )
             .await?,
         );
@@ -397,7 +402,7 @@ async fn submit_local_acp_query_on_worker(
     let session = session
         .as_mut()
         .expect("local ACP session exists after initialization");
-    apply_session_preferences(request.harness, request.model_id.as_deref(), session).await?;
+    apply_session_preferences(request.model_id.as_deref(), session).await?;
 
     prompt_local_acp_session(session, request, stream_tx).await
 }
@@ -408,102 +413,38 @@ async fn start_local_acp_session(
     model_id: Option<&str>,
     gemini_api_key: Option<&str>,
     remote: Option<&LocalAcpRemoteTarget>,
+    session_name: String,
 ) -> Result<LocalAcpWorkerSession> {
-    let spec = registry::spec_for_harness(harness)
-        .ok_or_else(|| anyhow!("{} does not support local ACP", harness))?;
-
-    let mut command = if let Some(remote) = remote {
-        let mut command = Command::new("ssh");
-        command.args(remote_ssh_args(remote, spec.command, spec.args));
-        command
-    } else {
-        let program = path_search::resolve_harness_command(harness, spec.command)
-            .with_context(|| format!("{} ACP command '{}' was not found", harness, spec.command))?;
-        let mut command = Command::new(program);
-        command.args(spec.args);
-        command.current_dir(cwd);
-        command
-    };
-    configure_process_env(&mut command, harness, gemini_api_key);
-
-    let connection = Connection::spawn(&mut command)?;
-    let initialize_result = connection
-        .initialize(super::connection::initialize_request())
-        .await?;
-
-    if registry::should_auto_authenticate(harness) {
-        if let Some(auth_method) = initialize_result.auth_methods.first() {
-            connection
-                .authenticate(acp::AuthenticateRequest::new(auth_method.id().clone()))
-                .await?;
-        }
+    if let Some(remote) = remote {
+        bail!(
+            "Remote ACP agents are not supported by the ACPX runner (requested {} in {})",
+            remote.host,
+            remote.cwd
+        );
     }
-
-    // The agent resolves the session cwd on the machine it runs on.
-    let session_cwd = match remote {
-        Some(remote) => PathBuf::from(&remote.cwd),
-        None => cwd.clone(),
-    };
-    let session = connection
-        .new_session(new_session_request(harness, &session_cwd))
-        .await?;
-    let session_id = session.session_id.clone();
-    let config_options = session.config_options.clone();
-    let has_session_models = session.models.is_some();
+    let profile = registry::acpx_profile_for_harness(harness)
+        .ok_or_else(|| anyhow!("{harness} does not support local ACPX"))?;
+    let command = acpx_command_for_profile(
+        AcpxCommand::ensure_session(
+            cwd,
+            "warp-placeholder-agent",
+            &session_name,
+            AcpxPermissionMode::ApproveReads,
+            300,
+        ),
+        profile,
+    );
+    run_acpx_command(command, cwd, harness, gemini_api_key).await?;
 
     let mut worker_session = LocalAcpWorkerSession {
-        connection,
-        session_id,
-        config_options,
-        has_session_models,
+        harness,
+        cwd: cwd.clone(),
+        session_name,
         applied_model_id: None,
-        applied_mode: None,
     };
-    apply_session_preferences(harness, model_id, &mut worker_session).await?;
+    apply_session_preferences(model_id, &mut worker_session).await?;
 
     Ok(worker_session)
-}
-
-/// Builds the ssh argument list that runs an ACP agent on a remote host with
-/// its stdio piped back to Warp. `bash -lc` gives the login PATH (agents are
-/// commonly installed under `~/.bun/bin` or `~/.local/bin`).
-fn remote_ssh_args(
-    remote: &LocalAcpRemoteTarget,
-    agent_command: &str,
-    agent_args: &[&str],
-) -> Vec<String> {
-    let mut remote_command = agent_command.to_string();
-    for arg in agent_args {
-        remote_command.push(' ');
-        remote_command.push_str(arg);
-    }
-    // The remote login shell strips the outer double quotes (pass 1), so
-    // `bash -lc` receives `cd <cwd> && exec <cmd>` where a leading `~` is
-    // unquoted and expands in bash's own pass. `cwd` comes from Warp's team
-    // config (never raw user text); escape the double-quote metacharacters
-    // so a hostile path can't break out of the payload.
-    vec![
-        // No TTY: ACP is a stdio JSON-RPC stream.
-        "-T".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        remote.host.clone(),
-        format!(
-            "bash -lc \"cd {} && exec {}\"",
-            escape_remote_shell_word(&remote.cwd),
-            remote_command
-        ),
-    ]
-}
-
-/// Escapes characters that would break out of the double-quoted `bash -lc`
-/// payload of [`remote_ssh_args`].
-fn escape_remote_shell_word(value: &str) -> String {
-    value
-        .replace('\\', r"\\")
-        .replace('"', "\\\"")
-        .replace('$', r"\$")
-        .replace('`', r"\`")
 }
 
 fn configure_process_env(command: &mut Command, harness: Harness, _gemini_api_key: Option<&str>) {
@@ -520,49 +461,9 @@ fn configure_process_env(command: &mut Command, harness: Harness, _gemini_api_ke
 }
 
 async fn apply_session_preferences(
-    harness: Harness,
     model_id: Option<&str>,
     session: &mut LocalAcpWorkerSession,
 ) -> Result<()> {
-    if let Some(mode_id) = registry::default_session_mode(harness) {
-        let should_apply_mode =
-            harness == Harness::Cursor || session.applied_mode.as_deref() != Some(mode_id);
-        if should_apply_mode {
-            match session
-                .connection
-                .set_session_mode(acp::SetSessionModeRequest::new(
-                    session.session_id.clone(),
-                    mode_id,
-                ))
-                .await
-            {
-                Ok(_) => {
-                    session.applied_mode = Some(mode_id.to_string());
-                }
-                Err(error) => {
-                    log::debug!(
-                        "ACP agent did not accept session mode via set_session_mode: {error:#}"
-                    );
-                    if let Err(error) = session
-                        .connection
-                        .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
-                            session.session_id.clone(),
-                            "mode",
-                            mode_id,
-                        ))
-                        .await
-                    {
-                        log::debug!(
-                            "ACP agent did not accept session mode via config option: {error:#}"
-                        );
-                    } else {
-                        session.applied_mode = Some(mode_id.to_string());
-                    }
-                }
-            }
-        }
-    }
-
     let Some(model_id) = model_id.filter(|model_id| !model_id.is_empty()) else {
         return Ok(());
     };
@@ -571,64 +472,21 @@ async fn apply_session_preferences(
         return Ok(());
     }
 
-    // Agents that report models via the session `models` field (codex-acp,
-    // cursor-agent) take model selection through `session/set_model`; the
-    // config-option path below does not exist for them.
-    if session.has_session_models {
-        match session
-            .connection
-            .set_session_model(acp::SetSessionModelRequest::new(
-                session.session_id.clone(),
-                model_id.to_string(),
-            ))
-            .await
-        {
-            Ok(_) => {
-                session.applied_model_id = Some(model_id.to_string());
-                return Ok(());
-            }
-            Err(error) => {
-                log::debug!("ACP agent did not accept model via session/set_model: {error:#}");
-            }
-        }
-    }
-
-    // Agents that deliver their model option asynchronously (e.g. the
-    // Antigravity agy-acp adapter via `config_option_update`) may not have a
-    // model option captured at session/new time — fall back to the
-    // conventional "model" config id rather than skipping selection.
-    let model_config_id = model_config_id(session.config_options.as_deref())
-        .unwrap_or_else(|| acp::SessionConfigId::new("model"));
-    if let Err(error) = session
-        .connection
-        .set_session_config_option(acp::SetSessionConfigOptionRequest::new(
-            session.session_id.clone(),
-            model_config_id,
-            model_id.to_string(),
-        ))
-        .await
-    {
-        log::debug!("ACP agent did not accept model config selection: {error:#}");
-    } else {
-        session.applied_model_id = Some(model_id.to_string());
-    }
+    let profile = registry::acpx_profile_for_harness(session.harness)
+        .ok_or_else(|| anyhow!("{} does not support local ACPX", session.harness))?;
+    let command = acpx_command_for_profile(
+        AcpxCommand::set_model(
+            &session.cwd,
+            "warp-placeholder-agent",
+            &session.session_name,
+            model_id,
+        ),
+        profile,
+    );
+    run_acpx_command(command, &session.cwd, session.harness, None).await?;
+    session.applied_model_id = Some(model_id.to_string());
 
     Ok(())
-}
-
-fn new_session_request(harness: Harness, cwd: &std::path::Path) -> acp::NewSessionRequest {
-    let mut new_session = acp::NewSessionRequest::new(cwd.to_path_buf());
-    if harness == Harness::Cursor {
-        if let Some(mode_id) = registry::default_session_mode(harness) {
-            let mut meta = Map::new();
-            meta.insert(
-                "default_mode".to_string(),
-                Value::String(mode_id.to_string()),
-            );
-            new_session = new_session.meta(meta);
-        }
-    }
-    new_session
 }
 
 async fn prompt_local_acp_session(
@@ -636,89 +494,140 @@ async fn prompt_local_acp_session(
     request: LocalAcpSubmitRequest,
     stream_tx: async_channel::Sender<LocalAcpStreamEvent>,
 ) -> Result<LocalAcpSubmitResult> {
-    let mut notifications = session.connection.subscribe_session_updates();
     let mut tool_calls_by_id: HashMap<String, LocalAcpToolCallMessage> = HashMap::new();
     let mut final_text = String::new();
     let prompt_text = match &request.context_primer {
         Some(primer) => format!("{primer}\n\n{}", request.prompt),
         None => request.prompt.clone(),
     };
-    let mut prompt = Box::pin(session.connection.prompt(acp::PromptRequest::new(
-        session.session_id.clone(),
-        vec![acp::ContentBlock::Text(acp::TextContent::new(prompt_text))],
-    )));
+    let profile = registry::acpx_profile_for_harness(session.harness)
+        .ok_or_else(|| anyhow!("{} does not support local ACPX", session.harness))?;
+    let command = acpx_command_for_profile(
+        AcpxCommand::prompt(
+            &session.cwd,
+            "warp-placeholder-agent",
+            &session.session_name,
+            &prompt_text,
+            AcpxPermissionMode::ApproveReads,
+            300,
+        ),
+        profile,
+    );
+    let mut process = spawn_acpx_command(
+        command,
+        &session.cwd,
+        session.harness,
+        request.gemini_api_key.as_deref(),
+    )?;
+    let stdout = process
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("ACPX prompt process did not expose stdout"))?;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut prompt_completed = false;
 
-    loop {
-        tokio::select! {
-            result = &mut prompt => {
-                result?;
-                break;
+    while let Some(line) = lines.next().await {
+        let line = line?;
+        match parse_acpx_frame(&line)? {
+            AcpxFrame::SessionUpdate(AcpxSessionUpdate::Text(text)) => {
+                final_text.push_str(&text);
+                let _ = stream_tx.send(LocalAcpStreamEvent::Text(text)).await;
             }
-            notification = notifications.next() => {
-                let Some(notification) = notification else {
-                    // Notification stream ended; wait for prompt to finish.
-                    prompt.await?;
-                    break;
-                };
-                match notification.update {
-                    acp::SessionUpdate::ToolCall(tool_call) => {
-                        let message = tool_calls::message_from_tool_call(tool_call);
-                        tool_calls_by_id.insert(message.tool_call_id.clone(), message.clone());
-                        let _ = stream_tx.send(LocalAcpStreamEvent::ToolCall(message)).await;
-                    }
-                    acp::SessionUpdate::ToolCallUpdate(update) => {
-                        let tool_call_id = update.tool_call_id.to_string();
-                        if let Some(existing) = tool_calls_by_id.get_mut(&tool_call_id) {
-                            tool_calls::apply_tool_call_update(existing, &update);
-                            let _ = stream_tx
-                                .send(LocalAcpStreamEvent::ToolCall(existing.clone()))
-                                .await;
-                        }
-                    }
-                    update => {
-                        if let Some(event) = stream_event_from_update(update) {
-                            if let LocalAcpStreamEvent::Text(text) = &event {
-                                final_text.push_str(text);
-                            }
-                            let _ = stream_tx.send(event).await;
-                        }
-                    }
+            AcpxFrame::SessionUpdate(AcpxSessionUpdate::Thought(text)) => {
+                let _ = stream_tx.send(LocalAcpStreamEvent::Thought(text)).await;
+            }
+            AcpxFrame::SessionUpdate(AcpxSessionUpdate::ToolCall(tool_call)) => {
+                let message = tool_calls::message_from_acpx_tool_call(tool_call);
+                tool_calls_by_id.insert(message.tool_call_id.clone(), message.clone());
+                let _ = stream_tx.send(LocalAcpStreamEvent::ToolCall(message)).await;
+            }
+            AcpxFrame::SessionUpdate(AcpxSessionUpdate::ToolCallUpdate(update)) => {
+                if let Some(existing) = tool_calls_by_id.get_mut(&update.id) {
+                    tool_calls::apply_acpx_tool_call_update(existing, &update);
+                    let _ = stream_tx
+                        .send(LocalAcpStreamEvent::ToolCall(existing.clone()))
+                        .await;
                 }
             }
+            AcpxFrame::PromptCompleted(_) => prompt_completed = true,
+            AcpxFrame::ProtocolError(error) => bail!("ACPX prompt failed: {}", error.message),
+            AcpxFrame::SessionUpdate(_) | AcpxFrame::Other => {}
         }
     }
 
+    let status = process
+        .status()
+        .await
+        .context("failed waiting for ACPX prompt")?;
+    if !status.success() {
+        bail!("ACPX prompt exited with {status}");
+    }
+    if !prompt_completed {
+        bail!("ACPX prompt exited without a prompt completion frame");
+    }
+
     Ok(LocalAcpSubmitResult {
-        session_id: session.session_id.to_string(),
+        session_id: session.session_name.clone(),
         final_text,
     })
 }
 
-fn model_config_id(
-    config_options: Option<&[acp::SessionConfigOption]>,
-) -> Option<acp::SessionConfigId> {
-    config_options?
-        .iter()
-        .find(|option| {
-            option.category == Some(acp::SessionConfigOptionCategory::Model)
-                || option.id.to_string().to_ascii_lowercase().contains("model")
-                || option.name.to_ascii_lowercase().contains("model")
-        })
-        .map(|option| option.id.clone())
+fn acpx_session_name(harness: Harness, conversation_id: AIConversationId, is_team: bool) -> String {
+    let tag = if is_team {
+        format!("team-{conversation_id}")
+    } else {
+        format!("conversation-{conversation_id}")
+    };
+    format!("warp-{}-{tag}", harness.to_string().to_ascii_lowercase())
 }
 
-fn stream_event_from_update(update: acp::SessionUpdate) -> Option<LocalAcpStreamEvent> {
-    match update {
-        acp::SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
-            acp::ContentBlock::Text(text) => Some(LocalAcpStreamEvent::Text(text.text)),
-            _ => None,
-        },
-        acp::SessionUpdate::AgentThoughtChunk(chunk) => match chunk.content {
-            acp::ContentBlock::Text(text) => Some(LocalAcpStreamEvent::Thought(text.text)),
-            _ => None,
-        },
-        _ => None,
+fn acpx_command_for_profile(
+    mut command: AcpxCommand,
+    profile: registry::AcpxAgentProfile,
+) -> AcpxCommand {
+    let placeholder = command
+        .args
+        .iter()
+        .position(|argument| argument == "warp-placeholder-agent")
+        .expect("ACPX command includes the agent placeholder");
+    command
+        .args
+        .splice(placeholder..=placeholder, profile.command_args());
+    command
+}
+
+fn spawn_acpx_command(
+    command: AcpxCommand,
+    cwd: &std::path::Path,
+    harness: Harness,
+    gemini_api_key: Option<&str>,
+) -> Result<async_process::Child> {
+    let mut process = Command::new(command.program);
+    process
+        .args(command.args)
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    configure_process_env(&mut process, harness, gemini_api_key);
+    process.spawn().context("failed to start ACPX")
+}
+
+async fn run_acpx_command(
+    command: AcpxCommand,
+    cwd: &std::path::Path,
+    harness: Harness,
+    gemini_api_key: Option<&str>,
+) -> Result<()> {
+    let output = spawn_acpx_command(command, cwd, harness, gemini_api_key)?
+        .output()
+        .await
+        .context("failed waiting for ACPX")?;
+    if !output.status.success() {
+        bail!("ACPX exited with {}", output.status);
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -748,48 +657,15 @@ mod tests {
     }
 
     #[test]
-    fn remote_ssh_args_wrap_agent_command_for_login_shell() {
-        let remote = LocalAcpRemoteTarget {
-            host: "genesis".to_string(),
-            cwd: "~/sync/warp".to_string(),
-        };
-        let args = remote_ssh_args(&remote, "devin", &["acp"]);
-        assert_eq!(
-            args,
-            vec![
-                "-T".to_string(),
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                "genesis".to_string(),
-                "bash -lc \"cd ~/sync/warp && exec devin acp\"".to_string(),
-            ]
-        );
-    }
+    fn persistent_acpx_session_names_include_harness_and_conversation_tag() {
+        let conversation = AIConversationId::new();
+        let normal = acpx_session_name(Harness::Codex, conversation, false);
+        let team = acpx_session_name(Harness::Codex, conversation, true);
 
-    #[test]
-    fn remote_ssh_args_escape_double_quote_metacharacters_in_cwd() {
-        // The cwd lands inside a double-quoted `bash -lc` payload on the
-        // remote side; $, `, " and \ must be neutralized so a hostile or
-        // malformed directory name can't break out of it.
-        let remote = LocalAcpRemoteTarget {
-            host: "genesis".to_string(),
-            cwd: "~/sync/$(reboot)".to_string(),
-        };
-        let args = remote_ssh_args(&remote, "codex-acp", &[]);
-        assert_eq!(
-            args[4],
-            r#"bash -lc "cd ~/sync/\$(reboot) && exec codex-acp""#
-        );
-
-        let remote = LocalAcpRemoteTarget {
-            host: "genesis".to_string(),
-            cwd: r#"~/sync/we"ird\`dir`"#.to_string(),
-        };
-        let args = remote_ssh_args(&remote, "codex-acp", &[]);
-        assert_eq!(
-            args[4],
-            r#"bash -lc "cd ~/sync/we\"ird\\\`dir\` && exec codex-acp""#
-        );
+        assert!(normal.starts_with("warp-codex-conversation-"));
+        assert!(normal.ends_with(&conversation.to_string()));
+        assert!(team.starts_with("warp-codex-team-"));
+        assert!(team.ends_with(&conversation.to_string()));
     }
 
     fn submit_toy_request_to_worker(

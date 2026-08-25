@@ -1,127 +1,72 @@
 use std::path::Path;
 
-use agent_client_protocol as acp;
+use serde_json::Value;
 
+use super::acpx_runner::{AcpxToolCall, AcpxToolCallUpdate};
 use crate::ai::agent::local_acp_tool_call::{
     LocalAcpDiff, LocalAcpToolCallMessage, LocalAcpToolCallStatus, LocalAcpToolKind,
 };
 use crate::ai::agent::{AIAgentText, AIAgentTextSection, AgentOutputText, ProgrammingLanguage};
 use crate::terminal::shell::ShellType;
 
-pub(crate) fn message_from_tool_call(tool_call: acp::ToolCall) -> LocalAcpToolCallMessage {
-    let kind = map_tool_kind(tool_call.kind);
-    let (body, diffs) = map_tool_call_fields(
-        kind,
-        &tool_call.content,
-        tool_call.raw_input.as_ref(),
-        tool_call.raw_output.as_ref(),
-        &tool_call.title,
-        &tool_call
-            .locations
-            .iter()
-            .map(|location| location.path.display().to_string())
-            .collect::<Vec<_>>(),
-    );
+/// Converts the raw ACP tool event relayed by ACPX into Warp's stable tool-card model.
+pub(crate) fn message_from_acpx_tool_call(tool_call: AcpxToolCall) -> LocalAcpToolCallMessage {
+    let kind = map_acpx_tool_kind(tool_call.kind.as_deref());
+    let locations = locations_from_acpx(tool_call.locations.as_ref());
+    let diffs = diffs_from_acpx(tool_call.content.as_ref());
+    let body = if kind == LocalAcpToolKind::Edit {
+        AIAgentText { sections: vec![] }
+    } else {
+        map_raw_fields_only(
+            kind,
+            tool_call.raw_input.as_ref(),
+            tool_call.raw_output.as_ref(),
+        )
+    };
 
     LocalAcpToolCallMessage {
-        tool_call_id: tool_call.tool_call_id.to_string(),
+        tool_call_id: tool_call.id,
         title: tool_call.title,
         kind,
-        status: map_tool_status(tool_call.status),
+        status: map_acpx_tool_status(tool_call.status.as_deref()),
         body,
         diffs,
-        locations: tool_call
-            .locations
-            .iter()
-            .map(|location| location.path.display().to_string())
-            .collect(),
+        locations,
     }
 }
 
-pub(crate) fn apply_tool_call_update(
+/// Applies only fields present in an ACPX `tool_call_update` event.
+pub(crate) fn apply_acpx_tool_call_update(
     message: &mut LocalAcpToolCallMessage,
-    update: &acp::ToolCallUpdate,
+    update: &AcpxToolCallUpdate,
 ) {
-    let fields = &update.fields;
-    if let Some(title) = &fields.title {
+    if let Some(title) = &update.title {
         message.title = title.clone();
     }
-    if let Some(kind) = fields.kind {
-        message.kind = map_tool_kind(kind);
+    if let Some(kind) = &update.kind {
+        message.kind = map_acpx_tool_kind(Some(kind));
     }
-    if let Some(status) = fields.status {
-        message.status = map_tool_status(status);
+    if let Some(status) = &update.status {
+        message.status = map_acpx_tool_status(Some(status));
     }
-    if let Some(locations) = &fields.locations {
-        message.locations = locations
-            .iter()
-            .map(|location| location.path.display().to_string())
-            .collect();
+    if let Some(locations) = &update.locations {
+        message.locations = locations_from_acpx(Some(locations));
     }
-
-    if let Some(content) = &fields.content {
-        let (body, diffs) = map_tool_call_fields(
-            message.kind,
-            content,
-            fields.raw_input.as_ref(),
-            fields.raw_output.as_ref(),
-            &message.title,
-            &message.locations,
-        );
-        if !body.sections.is_empty() {
-            message.body = body;
-        }
+    if let Some(content) = &update.content {
+        let diffs = diffs_from_acpx(Some(content));
         if !diffs.is_empty() {
             message.diffs = diffs;
         }
-    } else if fields.raw_output.is_some() || fields.raw_input.is_some() {
+    }
+    if update.raw_input.is_some() || update.raw_output.is_some() {
         let body = map_raw_fields_only(
             message.kind,
-            fields.raw_input.as_ref(),
-            fields.raw_output.as_ref(),
+            update.raw_input.as_ref(),
+            update.raw_output.as_ref(),
         );
         if !body.sections.is_empty() {
             message.body = body;
         }
-    }
-}
-
-fn map_tool_call_fields(
-    kind: LocalAcpToolKind,
-    content: &[acp::ToolCallContent],
-    raw_input: Option<&serde_json::Value>,
-    raw_output: Option<&serde_json::Value>,
-    title: &str,
-    locations: &[String],
-) -> (AIAgentText, Vec<LocalAcpDiff>) {
-    if !content.is_empty() {
-        return map_content(kind, content, raw_output, title, locations);
-    }
-
-    (map_raw_fields_only(kind, raw_input, raw_output), Vec::new())
-}
-
-fn map_content(
-    kind: LocalAcpToolKind,
-    content: &[acp::ToolCallContent],
-    raw_output: Option<&serde_json::Value>,
-    title: &str,
-    locations: &[String],
-) -> (AIAgentText, Vec<LocalAcpDiff>) {
-    match kind {
-        LocalAcpToolKind::Edit => (
-            AIAgentText { sections: vec![] },
-            diffs_from_content(content),
-        ),
-        LocalAcpToolKind::Execute => (
-            body_from_execute(content, raw_output, Some(title)),
-            Vec::new(),
-        ),
-        LocalAcpToolKind::Read => (
-            body_from_read_content(content, raw_output, locations),
-            Vec::new(),
-        ),
-        _ => (body_from_generic_content(content, raw_output), Vec::new()),
     }
 }
 
@@ -146,69 +91,8 @@ fn body_from_execute_output(raw_output: Option<&serde_json::Value>) -> AIAgentTe
     AIAgentText { sections }
 }
 
-fn body_from_execute(
-    content: &[acp::ToolCallContent],
-    raw_output: Option<&serde_json::Value>,
-    title: Option<&str>,
-) -> AIAgentText {
-    if let Some(output) = raw_output.and_then(extract_command_output) {
-        return AIAgentText {
-            sections: vec![shell_output_section(output)],
-        };
-    }
-
-    let mut sections = Vec::new();
-    for item in content {
-        let acp::ToolCallContent::Content(content) = item else {
-            continue;
-        };
-        let acp::ContentBlock::Text(text) = &content.content else {
-            continue;
-        };
-        if text.text.is_empty() {
-            continue;
-        }
-        if title.is_some_and(|title| text_matches_command_hint(&text.text, title)) {
-            continue;
-        }
-        sections.push(shell_output_section(text.text.clone()));
-    }
-    AIAgentText { sections }
-}
-
-fn text_matches_command_hint(text: &str, title: &str) -> bool {
-    let text = text.trim();
-    let title = title.trim();
-    text == title || title.ends_with(text) || text.ends_with(title)
-}
-
 fn body_from_execute_fields(raw_output: Option<&serde_json::Value>) -> AIAgentText {
     body_from_execute_output(raw_output)
-}
-
-fn body_from_read_content(
-    content: &[acp::ToolCallContent],
-    raw_output: Option<&serde_json::Value>,
-    locations: &[String],
-) -> AIAgentText {
-    let path = file_path_from_content_or_locations(content, locations);
-    let mut sections = Vec::new();
-
-    for item in content {
-        if let acp::ToolCallContent::Content(content) = item {
-            if let acp::ContentBlock::Text(text) = &content.content {
-                if !text.text.is_empty() {
-                    sections.push(read_output_section(&text.text, path.as_deref()));
-                }
-            }
-        }
-    }
-
-    if sections.is_empty() {
-        return body_from_read_raw_output(raw_output, locations);
-    }
-
-    AIAgentText { sections }
 }
 
 fn body_from_read_raw_output(
@@ -220,32 +104,6 @@ fn body_from_read_raw_output(
     if let Some(output) = raw_output.and_then(format_json_value) {
         sections.push(read_output_section(&output, path));
     }
-    AIAgentText { sections }
-}
-
-fn body_from_generic_content(
-    content: &[acp::ToolCallContent],
-    raw_output: Option<&serde_json::Value>,
-) -> AIAgentText {
-    let mut sections = Vec::new();
-    for item in content {
-        match item {
-            acp::ToolCallContent::Content(content) => match &content.content {
-                acp::ContentBlock::Text(text) if !text.text.is_empty() => {
-                    sections.push(text_section(format_tool_body_text(text.text.clone())));
-                }
-                _ => {}
-            },
-            acp::ToolCallContent::Terminal(_) => {}
-            acp::ToolCallContent::Diff(_) => {}
-            _ => {}
-        }
-    }
-
-    if sections.is_empty() {
-        return body_from_generic_raw_fields(None, raw_output);
-    }
-
     AIAgentText { sections }
 }
 
@@ -272,41 +130,20 @@ fn body_from_generic_raw_fields(
     AIAgentText { sections }
 }
 
-fn diffs_from_content(content: &[acp::ToolCallContent]) -> Vec<LocalAcpDiff> {
-    content
-        .iter()
-        .filter_map(|item| {
-            let acp::ToolCallContent::Diff(diff) = item else {
-                return None;
-            };
-            let path = diff.path.display().to_string();
-            Some(LocalAcpDiff {
-                path,
-                old_text: diff.old_text.clone(),
-                new_text: diff.new_text.clone(),
-            })
-        })
-        .collect()
-}
-
-fn file_path_from_content_or_locations(
-    content: &[acp::ToolCallContent],
-    locations: &[String],
-) -> Option<String> {
-    for item in content {
-        if let acp::ToolCallContent::Diff(diff) = item {
-            return Some(diff.path.display().to_string());
-        }
-    }
-    locations.first().cloned()
+fn shell_output_section(text: String) -> AIAgentTextSection {
+    code_section(text, Some(shell_language()))
 }
 
 fn read_output_section(text: &str, path: Option<&str>) -> AIAgentTextSection {
-    code_section(text.to_string(), language_for_path(path))
-}
-
-fn shell_output_section(text: String) -> AIAgentTextSection {
-    code_section(text, Some(shell_language()))
+    code_section(
+        text.to_string(),
+        path.and_then(|path| {
+            Path::new(path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| ProgrammingLanguage::from(extension.to_string()))
+        }),
+    )
 }
 
 fn code_section(code: String, language: Option<ProgrammingLanguage>) -> AIAgentTextSection {
@@ -325,15 +162,6 @@ fn text_section(text: String) -> AIAgentTextSection {
 
 fn shell_language() -> ProgrammingLanguage {
     ProgrammingLanguage::Shell(ShellType::Bash)
-}
-
-fn language_for_path(path: Option<&str>) -> Option<ProgrammingLanguage> {
-    path.and_then(|path| {
-        Path::new(path)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ProgrammingLanguage::from(ext.to_string()))
-    })
 }
 
 fn extract_command_output(value: &serde_json::Value) -> Option<String> {
@@ -397,19 +225,6 @@ fn should_suppress_edit_raw_output(output: &str) -> bool {
     output.contains("afterFullFileContent") || output.contains("beforeFullFileContent")
 }
 
-fn format_tool_body_text(text: String) -> String {
-    let trimmed = text.trim();
-    if trimmed.starts_with("```") {
-        return text;
-    }
-    if (trimmed.starts_with('{') || trimmed.starts_with('['))
-        && serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
-    {
-        return fenced_code_block("json", trimmed);
-    }
-    text
-}
-
 fn fenced_code_block(language: &str, content: &str) -> String {
     format!("```{language}\n{content}\n```")
 }
@@ -422,190 +237,152 @@ fn format_json_value(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn map_tool_kind(kind: acp::ToolKind) -> LocalAcpToolKind {
-    match kind {
-        acp::ToolKind::Read => LocalAcpToolKind::Read,
-        acp::ToolKind::Edit => LocalAcpToolKind::Edit,
-        acp::ToolKind::Delete => LocalAcpToolKind::Delete,
-        acp::ToolKind::Move => LocalAcpToolKind::Move,
-        acp::ToolKind::Search => LocalAcpToolKind::Search,
-        acp::ToolKind::Execute => LocalAcpToolKind::Execute,
-        acp::ToolKind::Think => LocalAcpToolKind::Think,
-        acp::ToolKind::Fetch => LocalAcpToolKind::Fetch,
-        acp::ToolKind::SwitchMode => LocalAcpToolKind::SwitchMode,
-        acp::ToolKind::Other => LocalAcpToolKind::Other,
+fn map_acpx_tool_kind(kind: Option<&str>) -> LocalAcpToolKind {
+    match kind.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "read" | "read_file" | "list" => LocalAcpToolKind::Read,
+        "edit" | "write" | "write_file" | "apply_patch" => LocalAcpToolKind::Edit,
+        "delete" | "remove" => LocalAcpToolKind::Delete,
+        "move" | "rename" => LocalAcpToolKind::Move,
+        "search" | "grep" | "glob" => LocalAcpToolKind::Search,
+        "execute" | "terminal" | "bash" | "command" => LocalAcpToolKind::Execute,
+        "think" => LocalAcpToolKind::Think,
+        "fetch" | "web" => LocalAcpToolKind::Fetch,
+        "switch_mode" => LocalAcpToolKind::SwitchMode,
         _ => LocalAcpToolKind::Other,
     }
 }
 
-fn map_tool_status(status: acp::ToolCallStatus) -> LocalAcpToolCallStatus {
-    match status {
-        acp::ToolCallStatus::Pending => LocalAcpToolCallStatus::Pending,
-        acp::ToolCallStatus::InProgress => LocalAcpToolCallStatus::InProgress,
-        acp::ToolCallStatus::Completed => LocalAcpToolCallStatus::Completed,
-        acp::ToolCallStatus::Failed => LocalAcpToolCallStatus::Failed,
+fn map_acpx_tool_status(status: Option<&str>) -> LocalAcpToolCallStatus {
+    match status.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "pending" => LocalAcpToolCallStatus::Pending,
+        "in_progress" | "inprogress" | "running" => LocalAcpToolCallStatus::InProgress,
+        "completed" | "complete" | "success" => LocalAcpToolCallStatus::Completed,
+        "failed" | "error" | "cancelled" => LocalAcpToolCallStatus::Failed,
         _ => LocalAcpToolCallStatus::Pending,
     }
+}
+
+fn locations_from_acpx(locations: Option<&Value>) -> Vec<String> {
+    locations
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| {
+            location
+                .get("path")
+                .or_else(|| location.get("uri"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn diffs_from_acpx(content: Option<&Value>) -> Vec<LocalAcpDiff> {
+    content
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let diff = item.get("diff").unwrap_or(item);
+            let path = diff.get("path").and_then(Value::as_str)?;
+            let new_text = diff
+                .get("newText")
+                .or_else(|| diff.get("new_text"))
+                .and_then(Value::as_str)?;
+            Some(LocalAcpDiff {
+                path: path.to_string(),
+                old_text: diff
+                    .get("oldText")
+                    .or_else(|| diff.get("old_text"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                new_text: new_text.to_string(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::agent::AIAgentTextSection;
+    use serde_json::json;
 
     #[test]
-    fn maps_tool_call_with_text_content() {
-        let tool_call = acp::ToolCall::new("tool-1", "Read file")
-            .kind(acp::ToolKind::Read)
-            .status(acp::ToolCallStatus::Completed)
-            .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
-                acp::TextContent::new("hello"),
-            ))]);
+    fn maps_acpx_execute_tool_call_with_raw_output() {
+        let tool_call = AcpxToolCall {
+            id: "exec-1".to_string(),
+            title: "ls".to_string(),
+            kind: Some("execute".to_string()),
+            status: Some("completed".to_string()),
+            raw_input: Some(json!({ "command": "ls" })),
+            raw_output: Some(json!({ "stdout": "file.txt", "stderr": "warning" })),
+            content: None,
+            locations: None,
+        };
 
-        let message = message_from_tool_call(tool_call);
-        assert_eq!(message.tool_call_id, "tool-1");
-        assert_eq!(message.title, "Read file");
-        assert_eq!(message.kind, LocalAcpToolKind::Read);
+        let message = message_from_acpx_tool_call(tool_call);
+        assert_eq!(message.tool_call_id, "exec-1");
+        assert_eq!(message.kind, LocalAcpToolKind::Execute);
         assert_eq!(message.status, LocalAcpToolCallStatus::Completed);
-        assert!(message.has_visible_body());
-    }
-
-    #[test]
-    fn wraps_json_tool_output_in_code_fence_for_generic_tools() {
-        let tool_call =
-            acp::ToolCall::new("tool-2", "grep").content(vec![acp::ToolCallContent::from(
-                acp::ContentBlock::Text(acp::TextContent::new(r#"{"success":true}"#)),
-            )]);
-
-        let message = message_from_tool_call(tool_call);
-        assert!(message.body_plain_text().contains("```json"));
-        assert!(message.body_plain_text().contains(r#""success":true"#));
-    }
-
-    #[test]
-    fn execute_with_content_and_raw_output_shows_stdout_once() {
-        let tool_call = acp::ToolCall::new("exec-1", "cd /tmp && ls -al")
-            .kind(acp::ToolKind::Execute)
-            .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
-                acp::TextContent::new("cd /tmp && ls -al"),
-            ))])
-            .raw_output(serde_json::json!({
-                "stdout": "total 0\ndrwxr-xr-x",
-                "stderr": ""
-            }));
-
-        let message = message_from_tool_call(tool_call);
         assert_eq!(message.body.sections.len(), 1);
-        match &message.body.sections[0] {
-            AIAgentTextSection::Code { code, language, .. } => {
-                assert!(code.contains("total 0"));
-                assert!(language.as_ref().is_some_and(|lang| lang.is_shell()));
-            }
-            other => panic!("expected code section, got {other:?}"),
-        }
-        assert!(!message.body_plain_text().contains("cd /tmp"));
+        assert!(message.body_plain_text().is_empty());
     }
 
     #[test]
-    fn execute_with_only_raw_output_json_shows_fenced_stdout() {
-        let tool_call = acp::ToolCall::new("exec-2", "ls")
-            .kind(acp::ToolKind::Execute)
-            .raw_output(serde_json::json!({
-                "stdout": "file.txt",
-                "stderr": "warning"
-            }));
+    fn maps_acpx_edit_diff_into_structured_diff() {
+        let tool_call = AcpxToolCall {
+            id: "edit-1".to_string(),
+            title: "Edit src/foo.rs".to_string(),
+            kind: Some("edit".to_string()),
+            status: Some("in_progress".to_string()),
+            raw_input: None,
+            raw_output: None,
+            content: Some(json!([{
+                "type": "diff",
+                "path": "src/foo.rs",
+                "oldText": "old content",
+                "newText": "new content"
+            }])),
+            locations: Some(json!([{ "path": "src/foo.rs" }])),
+        };
 
-        let message = message_from_tool_call(tool_call);
-        match &message.body.sections[0] {
-            AIAgentTextSection::Code { code, .. } => {
-                assert!(code.contains("file.txt"));
-                assert!(code.contains("warning"));
-            }
-            other => panic!("expected code section, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn read_file_uses_extension_for_syntax_highlighting() {
-        let tool_call = acp::ToolCall::new("read-1", "Read src/foo.rs")
-            .kind(acp::ToolKind::Read)
-            .locations(vec![acp::ToolCallLocation::new("src/foo.rs")])
-            .content(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
-                acp::TextContent::new("fn main() {}"),
-            ))]);
-
-        let message = message_from_tool_call(tool_call);
-        match &message.body.sections[0] {
-            AIAgentTextSection::Code { code, language, .. } => {
-                assert_eq!(code, "fn main() {}");
-                assert!(language.as_ref().is_some_and(|lang| {
-                    matches!(lang, ProgrammingLanguage::Other(name) if name == "rs")
-                }));
-            }
-            other => panic!("expected code section, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn edit_tool_puts_diffs_in_structured_field_not_body() {
-        let tool_call = acp::ToolCall::new("edit-1", "Edit src/foo.rs")
-            .kind(acp::ToolKind::Edit)
-            .content(vec![acp::ToolCallContent::Diff(
-                acp::Diff::new("src/foo.rs", "new content").old_text("old content"),
-            )])
-            .raw_output(serde_json::json!({
-                "success": true,
-                "afterFullFileContent": "ignored"
-            }));
-
-        let message = message_from_tool_call(tool_call);
+        let message = message_from_acpx_tool_call(tool_call);
         assert!(message.body.sections.is_empty());
         assert_eq!(message.diffs.len(), 1);
         assert_eq!(message.diffs[0].path, "src/foo.rs");
+        assert_eq!(message.diffs[0].old_text.as_deref(), Some("old content"));
         assert_eq!(message.diffs[0].new_text, "new content");
-        assert!(message.has_visible_body());
+        assert_eq!(message.locations, vec!["src/foo.rs"]);
     }
 
     #[test]
-    fn partial_update_does_not_clear_body_on_empty_sections() {
-        let mut message = message_from_tool_call(
-            acp::ToolCall::new("exec-3", "ls")
-                .kind(acp::ToolKind::Execute)
-                .raw_output(serde_json::json!({"stdout": "a"})),
-        );
+    fn acpx_update_preserves_existing_body_when_only_status_changes() {
+        let mut message = message_from_acpx_tool_call(AcpxToolCall {
+            id: "exec-2".to_string(),
+            title: "ls".to_string(),
+            kind: Some("execute".to_string()),
+            status: None,
+            raw_input: None,
+            raw_output: Some(json!({ "stdout": "a" })),
+            content: None,
+            locations: None,
+        });
 
-        apply_tool_call_update(
+        apply_acpx_tool_call_update(
             &mut message,
-            &acp::ToolCallUpdate::new(
-                "exec-3",
-                acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::Completed),
-            ),
+            &AcpxToolCallUpdate {
+                id: "exec-2".to_string(),
+                title: None,
+                kind: None,
+                status: Some("completed".to_string()),
+                raw_input: None,
+                raw_output: None,
+                content: None,
+                locations: None,
+            },
         );
 
+        assert_eq!(message.status, LocalAcpToolCallStatus::Completed);
         assert_eq!(message.body.sections.len(), 1);
-    }
-
-    #[test]
-    fn edit_diff_only_update_sets_diffs_without_body() {
-        let mut message = message_from_tool_call(
-            acp::ToolCall::new("edit-2", "Edit file")
-                .kind(acp::ToolKind::Edit)
-                .content(vec![acp::ToolCallContent::Diff(
-                    acp::Diff::new("a.txt", "b").old_text("a"),
-                )]),
-        );
-
-        apply_tool_call_update(
-            &mut message,
-            &acp::ToolCallUpdate::new(
-                "edit-2",
-                acp::ToolCallUpdateFields::new().content(vec![acp::ToolCallContent::Diff(
-                    acp::Diff::new("a.txt", "bb").old_text("a"),
-                )]),
-            ),
-        );
-
-        assert!(message.body.sections.is_empty());
-        assert_eq!(message.diffs[0].new_text, "bb");
     }
 }

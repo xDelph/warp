@@ -75,7 +75,7 @@ pub fn convert_to_acpx_transcript(
     transcript.push(AcpxTranscriptEntry::Session {
         agent: harness.display_name().to_string(),
         mode: "persistent".to_string(),
-        permission_mode: "approve-all".to_string(),
+        permission_mode: "approve-reads".to_string(),
         acp_session_id: session_id.to_string(),
         runtime_session_name: format!("warp-acpx-{}", harness.display_name().to_lowercase()),
     });

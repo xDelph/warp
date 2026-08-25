@@ -50,7 +50,6 @@ test = false
 
 [dependencies]
 addr = "0.15.6"
-agent-client-protocol = { workspace = true, optional = true }
 ai.workspace = true
 ai_types.workspace = true
 alphanumeric-sort = "1.5.7"
@@ -747,7 +746,7 @@ grep_tool = []
 # For the most part, including GUI code in headless builds is fine; the main use case is
 # for things that pull in external dependencies.
 gui = ["voice_input"]
-local_acp = ["agent_harness", "dep:agent-client-protocol"]
+local_acp = ["agent_harness"]
 nld_classifier_v1 = ["input_classifier/nld_classifier_v1"]
 nld_classifier_v2 = ["input_classifier/nld_classifier_v2"]
 nld_classifier_v3 = ["input_classifier/nld_classifier_v3"]
